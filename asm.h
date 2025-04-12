@@ -15,6 +15,7 @@
 typedef struct asm_state_s {
   // File paths
   const char *input_files[MAX_FILES];
+  size_t nof_input_files;
   const char *output_file;
 
   // File position data
@@ -31,14 +32,22 @@ typedef struct asm_state_s {
 
   // ELF data
   elf_symbol_t symbols[MAX_SYMBOLS];
+  size_t nof_symbols;
   elf_section_t sections[MAX_SECTIONS];
+  size_t nof_sections;
 } asm_state_t;
 
 void assembler_init(asm_state_t *state);
 void assembler_add_input_file(asm_state_t *state, const char *filename);
 void assembler_set_output_file(asm_state_t *state, const char *filename);
 void assembler_free(asm_state_t *state);
+void asm_error(asm_state_t *state, const char *err_msg);
 
-bool assembler_write_object_file(asm_state_t *state);
+void add_section(asm_state_t *state, const char *name, Elf64_Word type,
+                 Elf64_Xword flags, Elf64_Xword addralign, Elf64_Xword entsize);
+
+bool write_elf_object_file(asm_state_t *state);
+
+char *get_asm_state_info(const asm_state_t *state);
 
 #endif

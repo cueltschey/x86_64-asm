@@ -1,10 +1,17 @@
 #ifndef ELF_H
 #define ELF_H
 
+#define INITIAL_CAPACITY 1024
+
 #include <elf.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 typedef struct asm_buf_s {
   uint8_t *data;
@@ -39,5 +46,13 @@ typedef struct elf_symbol_s {
   bool defined;
   bool global;
 } elf_symbol_t;
+
+void buffer_init(asm_buf_t *buf);
+
+void buffer_destroy(asm_buf_t *buf);
+
+void buffer_ensure_capacity(asm_buf_t *buf, size_t additional_needed);
+
+void buffer_append(asm_buf_t *buf, const void *data, size_t size);
 
 #endif
