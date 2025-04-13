@@ -54,6 +54,56 @@ int add_symbol(asm_state_t *state, const char *name, uint16_t shndx,
   return state->nof_symbols++;
 }
 
+void build_elf_strtab_symtab(asm_state_t *state) {
+  elf_section_t *symtab_sec = &state->sections[state->symtab_idx];
+  elf_section_t *strtab_sec = &state->sections[state->strtab_idx];
+
+  buffer_destroy(&symtab_sec->content);
+  buffer_init(&symtab_sec->content);
+
+  // The first symbol (index 0) is always the NULL symbol, add it explicitly
+  Elf64_Sym null_sym;
+  memset(&null_sym, 0, sizeof(Elf64_Sym));
+  buffer_append(&symtab_sec->content, &null_sym, sizeof(Elf64_Sym));
+
+  int first_global_idx = 0; // Index of first non-local symbol
+
+  for (size_t i = 1; i < state->nof_symbols; ++i) {
+    elf_symbol_t *my_sym = &state->symbols[i];
+    Elf64_Sym elf_sym;
+    memset(&elf_sym, 0, sizeof(Elf64_Sym));
+
+    if (strlen(my_sym->name) > 0) {
+      size_t name_len = strlen(my_sym->name);
+      my_sym->name_idx = strtab_sec->content.size + name_len + 1;
+      buffer_append(&strtab_sec->content, my_sym->name, name_len);
+      buffer_append(&strtab_sec->content, "\0", 1);
+    } else {
+      my_sym->name_idx = 0;
+    }
+
+    // Populate the Elf64_Sym structure
+    elf_sym.st_name = my_sym->name_idx;
+    elf_sym.st_info = my_sym->info;
+    elf_sym.st_other = my_sym->other;
+    elf_sym.st_shndx = my_sym->shndx;
+    elf_sym.st_value = my_sym->value;
+    elf_sym.st_size =
+        my_sym->size; // TODO: Still need to calculate function sizes
+
+    buffer_append(&symtab_sec->content, &elf_sym, sizeof(Elf64_Sym));
+
+    if (first_global_idx == 0 && ELF64_ST_BIND(elf_sym.st_info) != STB_LOCAL) {
+      first_global_idx = i;
+    }
+  }
+  strtab_sec->size = strtab_sec->content.size;
+
+  symtab_sec->link = state->strtab_idx;
+  symtab_sec->info = first_global_idx;
+  symtab_sec->size = symtab_sec->content.size;
+}
+
 void add_section(asm_state_t *state, const char *name, Elf64_Word type,
                  Elf64_Xword flags, Elf64_Xword addralign,
                  Elf64_Xword entsize) {
@@ -147,6 +197,9 @@ bool write_elf_object_file(asm_state_t *state) {
   }
 
   buffer_append(&state->sections[state->shstrtab_idx].content, "\0", 1);
+
+  // Add strtab and symtab data
+  build_elf_strtab_symtab(state);
 
   Elf64_Ehdr elf_header;
   Elf64_Shdr *section_headers = calloc(state->nof_sections, sizeof(Elf64_Shdr));
