@@ -135,6 +135,19 @@ void assembler_set_output_file(asm_state_t *state, const char *filename) {
 }
 
 bool write_elf_object_file(asm_state_t *state) {
+  // Write all section names to shstrtab
+  // Assign correct sh_name to each section
+  size_t current_section_name = 1;
+  for (size_t i = 0; i < state->nof_sections; i++) {
+    state->sections[i].name_idx = current_section_name;
+    buffer_append(&state->sections[state->shstrtab_idx].content,
+                  state->sections[i].name, strlen(state->sections[i].name));
+    buffer_append(&state->sections[state->shstrtab_idx].content, "\0", 1);
+    current_section_name += strlen(state->sections[i].name) + 1;
+  }
+
+  buffer_append(&state->sections[state->shstrtab_idx].content, "\0", 1);
+
   Elf64_Ehdr elf_header;
   Elf64_Shdr *section_headers = calloc(state->nof_sections, sizeof(Elf64_Shdr));
   if (!section_headers) {
@@ -266,7 +279,6 @@ bool write_elf_object_file(asm_state_t *state) {
     }
   }
 
-  // --- 6. Write Section Header Table ---
   printf("Writing Section Header Table (offset %llu, size %zu)\n",
          (unsigned long long)elf_header.e_shoff,
          state->nof_sections * sizeof(Elf64_Shdr));
@@ -281,8 +293,7 @@ bool write_elf_object_file(asm_state_t *state) {
     perror("Failed to write section headers");
   }
 
-  // --- Cleanup ---
-  free(section_headers); // Free the allocated section header table
+  free(section_headers);
   close(fd);
   return true;
 }
@@ -337,8 +348,9 @@ char *get_asm_state_info(const asm_state_t *state) {
   for (size_t i = 0; i < state->nof_sections && i < MAX_SECTIONS; ++i) {
     char section_buf[128];
 
-    snprintf(section_buf, sizeof(section_buf), "  Symbol[%ld]: name=%s\n", i,
-             state->sections[i].name);
+    snprintf(section_buf, sizeof(section_buf),
+             "  Section[%ld]: name=%s, content=%s\n", i,
+             state->sections[i].name, (char *)state->sections[i].content.data);
     offset += snprintf(buffer + offset, bufsize - offset, "%s", section_buf);
   }
 
