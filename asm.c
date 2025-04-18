@@ -41,15 +41,17 @@ int add_symbol(asm_state_t *state, const char *name, uint16_t shndx,
 
   elf_symbol_t *sym = &state->symbols[state->nof_symbols];
   strncpy(sym->name, name, sizeof(sym->name) - 1);
-  sym->name[sizeof(sym->name) - 1] = '\0';
+  sym->name[sizeof(sym->name) - 1] = '\0'; // Ensure null-termination
   sym->value = value;
-  sym->size = 0; // Size often determined later or for data/functions
+  sym->size = 0;
   sym->info = ELF64_ST_INFO(binding, type);
   sym->other = STV_DEFAULT;
   sym->shndx = shndx;
-  sym->defined = (shndx != SHN_UNDEF); // Defined if associated with a section
+  sym->defined = (shndx != SHN_UNDEF);
   sym->global = (binding == STB_GLOBAL);
-  sym->name_idx = 0; // Will be set when building .strtab
+  sym->name_idx = 0;
+
+  strncpy(sym->name, name, sizeof(sym->name));
 
   return state->nof_symbols++;
 }
@@ -66,7 +68,7 @@ void build_elf_strtab_symtab(asm_state_t *state) {
   memset(&null_sym, 0, sizeof(Elf64_Sym));
   buffer_append(&symtab_sec->content, &null_sym, sizeof(Elf64_Sym));
 
-  int first_global_idx = 0; // Index of first non-local symbol
+  int first_global_idx = -1;
 
   for (size_t i = 1; i < state->nof_symbols; ++i) {
     elf_symbol_t *my_sym = &state->symbols[i];
@@ -75,7 +77,7 @@ void build_elf_strtab_symtab(asm_state_t *state) {
 
     if (strlen(my_sym->name) > 0) {
       size_t name_len = strlen(my_sym->name);
-      my_sym->name_idx = strtab_sec->content.size + name_len + 1;
+      my_sym->name_idx = strtab_sec->content.size;
       buffer_append(&strtab_sec->content, my_sym->name, name_len);
       buffer_append(&strtab_sec->content, "\0", 1);
     } else {
@@ -88,19 +90,19 @@ void build_elf_strtab_symtab(asm_state_t *state) {
     elf_sym.st_other = my_sym->other;
     elf_sym.st_shndx = my_sym->shndx;
     elf_sym.st_value = my_sym->value;
-    elf_sym.st_size =
-        my_sym->size; // TODO: Still need to calculate function sizes
+    elf_sym.st_size = my_sym->size;
 
     buffer_append(&symtab_sec->content, &elf_sym, sizeof(Elf64_Sym));
 
-    if (first_global_idx == 0 && ELF64_ST_BIND(elf_sym.st_info) != STB_LOCAL) {
+    if (first_global_idx == -1 && ELF64_ST_BIND(elf_sym.st_info) != STB_LOCAL) {
       first_global_idx = i;
     }
   }
   strtab_sec->size = strtab_sec->content.size;
 
   symtab_sec->link = state->strtab_idx;
-  symtab_sec->info = first_global_idx;
+  symtab_sec->info =
+      first_global_idx == -1 ? (int)state->nof_symbols : first_global_idx;
   symtab_sec->size = symtab_sec->content.size;
 }
 
@@ -144,7 +146,7 @@ void add_section(asm_state_t *state, const char *name, Elf64_Word type,
 void assembler_init(asm_state_t *state) {
   memset(state, 0, sizeof(asm_state_t));
   state->output_file = "a.out";
-  state->current_file = -1;
+  state->current_file = 0;
   state->current_line = 0;
 
   state->text_idx = -1;
@@ -164,9 +166,6 @@ void assembler_init(asm_state_t *state) {
 
   // Symbol 0: NULL symbol
   add_symbol(state, "", SHN_UNDEF, 0, STT_NOTYPE, STB_LOCAL);
-  // Symbol 1: Placeholder for File symbol (name set later in main after parsing
-  // args)
-  add_symbol(state, "", SHN_ABS, 0, STT_FILE, STB_LOCAL);
 
   // Initialize string tables with the required initial NULL byte
   buffer_append(&state->sections[state->strtab_idx].content, "\0", 1);

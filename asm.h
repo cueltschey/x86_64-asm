@@ -50,4 +50,7 @@ bool write_elf_object_file(asm_state_t *state);
 
 char *get_asm_state_info(const asm_state_t *state);
 
+int add_symbol(asm_state_t *state, const char *name, uint16_t shndx,
+               Elf64_Addr value, uint8_t type, uint8_t binding);
+
 #endif

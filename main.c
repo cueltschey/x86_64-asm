@@ -1,6 +1,7 @@
 #include "args.h"
 #include "asm.h"
 #include "elf.h"
+#include <elf.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -16,7 +17,15 @@ int main(int argc, char **argv) {
     usage(argv);
     return EXIT_FAILURE;
   }
+
+  add_symbol(&state, ".file", SHN_ABS, 0, STT_FILE, STB_LOCAL);
   write_elf_object_file(&state);
+
+  for (size_t i = 0; i < state.nof_symbols; i++) {
+    printf("DEBUG: %d, %s\n", state.symbols[i].name_idx,
+           (char *)&state.sections[state.strtab_idx]
+               .content.data[state.symbols[i].name_idx]);
+  }
 
   char *info_str = get_asm_state_info(&state);
   if (info_str)
