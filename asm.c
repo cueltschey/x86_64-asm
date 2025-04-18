@@ -1,7 +1,10 @@
+#define _POSIX_C_SOURCE 200809L
 #include "asm.h"
 #include "elf.h"
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 void asm_error(asm_state_t *state, const char *err_msg) {
   fprintf(stderr, "Error occured in file %s line %ld: %s\n",
@@ -140,6 +143,8 @@ void add_section(asm_state_t *state, const char *name, Elf64_Word type,
     state->strtab_idx = state->nof_sections;
   else if (strcmp(name, ".shstrtab") == 0)
     state->shstrtab_idx = state->nof_sections;
+  else if (strcmp(name, ".rodata") == 0)
+    state->rodata_idx = state->nof_sections;
 
   state->nof_sections++;
 }
@@ -155,11 +160,13 @@ void assembler_init(asm_state_t *state) {
   state->symtab_idx = -1;
   state->strtab_idx = -1;
   state->shstrtab_idx = -1;
+  state->rodata_idx = -1;
 
   // Add mandatory NULL section
   add_section(state, "", SHT_NULL, 0, 0, 0); // Section 0 is always NULL
 
   add_section(state, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 4, 0);
+  add_section(state, ".rodata", SHT_PROGBITS, SHF_ALLOC, 4, 0);
   add_section(state, ".note.GNU-stack", SHT_PROGBITS, 0, 1, 0);
   add_section(state, ".symtab", SHT_SYMTAB, 0, 8, sizeof(Elf64_Sym));
   add_section(state, ".strtab", SHT_STRTAB, 0, 1, 0);
@@ -449,9 +456,10 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
 
   char line_buffer[MAX_LINE_SIZE];
   while (fgets(line_buffer, sizeof(line_buffer), infile)) {
+    state->current_line++;
     line_buffer[strcspn(line_buffer, "\r\n")] = 0;
     if (!encode_instr(state, line_buffer)) {
-      fprintf(stderr, "Failed to encode instruction: %s", line_buffer);
+      fprintf(stderr, "Failed to encode instruction: %s\n", line_buffer);
       ret = false;
       break;
     }
@@ -461,7 +469,7 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
 
 bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
 
-  // char *tokens[10];
+  char *tokens[10];
   char *trimmed_line = line_buffer;
   char *label = NULL;
 
@@ -481,10 +489,47 @@ bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
       trimmed_line++;
   }
 
-  if (label)
+  if (label) {
     printf("LABEL FOUND: %s\n", label);
-  printf("Trimmed: %s\n", trimmed_line);
-  printf("state: %ld\n", state->current_line);
+    if (strcmp(label, "main") == 0) {
+      add_symbol(state, label, state->text_idx, 0, STT_FUNC, STB_GLOBAL);
+    }
+    return true;
+  }
 
+  size_t nof_tokens = 0;
+  if (!tokenize_line(trimmed_line, tokens, &nof_tokens)) {
+    fprintf(stderr, "Tokenization failed: %s\n", trimmed_line);
+    return false;
+  }
+
+  printf("TOKENS: %ld, %s\n", nof_tokens, tokens[0]);
+
+  if (strcmp(tokens[0], ".file") == 0) {
+    printf("HERE\n");
+    add_symbol(state, tokens[1], SHN_ABS, 0, STT_FILE, STB_LOCAL);
+    return true;
+  }
   return true;
+}
+
+bool tokenize_line(char *trimmed_line, char *tokens[10], size_t *nof_tokens) {
+  *nof_tokens = 0;
+  size_t line_len = strlen(trimmed_line);
+  char *p = trimmed_line;
+  char *word = trimmed_line;
+
+  for (size_t char_idx = 0; char_idx < line_len; char_idx++) {
+    if (*p == ' ' || *p == 9) {
+      *p = '\0';
+      if (strlen(word) > 0)
+        tokens[(*nof_tokens)++] = strdup(word);
+      word = p + 1;
+    }
+    p++;
+  }
+
+  tokens[(*nof_tokens)++] = strdup(word);
+
+  return *nof_tokens > 0;
 }

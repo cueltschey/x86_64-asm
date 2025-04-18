@@ -31,6 +31,7 @@ typedef struct asm_state_s {
   size_t symtab_idx;
   size_t strtab_idx;
   size_t shstrtab_idx;
+  size_t rodata_idx;
 
   // ELF data
   elf_symbol_t symbols[MAX_SYMBOLS];
@@ -60,5 +61,7 @@ bool assembler_run(asm_state_t *state);
 bool assemble_file(asm_state_t *state, size_t file_idx);
 
 bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]);
+
+bool tokenize_line(char *trimmed_line, char *tokens[10], size_t *nof_tokens);
 
 #endif
