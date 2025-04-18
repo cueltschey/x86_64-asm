@@ -1,5 +1,6 @@
 #include "asm.h"
 #include "elf.h"
+#include <ctype.h>
 #include <stdio.h>
 
 void asm_error(asm_state_t *state, const char *err_msg) {
@@ -407,4 +408,83 @@ char *get_asm_state_info(const asm_state_t *state) {
   }
 
   return buffer;
+}
+
+bool assembler_run(asm_state_t *state) {
+  if (state->nof_input_files == 0) {
+    fprintf(stderr, "Error: No input files specified.\n");
+    return false;
+  }
+
+  printf("Converting to Machine Code...\n");
+  for (size_t i = 0; i < state->nof_input_files; i++) {
+    if (!assemble_file(state, i)) {
+      fprintf(stderr, "Translation failed in file %s line %ld.\n",
+              state->input_files[state->current_file], state->current_line);
+      return false;
+    }
+  }
+  printf("Writing ELF file...\n");
+  // add_symbol(&state, ".file", SHN_ABS, 0, STT_FILE, STB_LOCAL);
+  if (!write_elf_object_file(state)) {
+    fprintf(stderr, "Failed to write to ELF file %s\n", state->output_file);
+    return false;
+  }
+
+  printf("Assembly successful.\n");
+  return true;
+}
+
+bool assemble_file(asm_state_t *state, size_t file_idx) {
+  FILE *infile = fopen(state->input_files[file_idx], "r");
+  if (!infile) {
+    perror("fopen failed");
+    fprintf(stderr, "Error opening input file: %s\n",
+            state->input_files[file_idx]);
+    return false;
+  }
+
+  state->current_line = 0;
+  bool ret = true;
+
+  char line_buffer[MAX_LINE_SIZE];
+  while (fgets(line_buffer, sizeof(line_buffer), infile)) {
+    line_buffer[strcspn(line_buffer, "\r\n")] = 0;
+    if (!encode_instr(state, line_buffer)) {
+      fprintf(stderr, "Failed to encode instruction: %s", line_buffer);
+      ret = false;
+      break;
+    }
+  }
+  return ret;
+}
+
+bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
+
+  // char *tokens[10];
+  char *trimmed_line = line_buffer;
+  char *label = NULL;
+
+  while (isspace((unsigned char)*trimmed_line))
+    trimmed_line++;
+
+  if (*trimmed_line == '\0' || *trimmed_line == ';') {
+    return true;
+  }
+
+  char *colon = strchr(trimmed_line, ':');
+  if (colon) {
+    *colon = '\0';
+    label = trimmed_line;
+    trimmed_line = colon + 1;
+    while (isspace((unsigned char)*trimmed_line))
+      trimmed_line++;
+  }
+
+  if (label)
+    printf("LABEL FOUND: %s\n", label);
+  printf("Trimmed: %s\n", trimmed_line);
+  printf("state: %ld\n", state->current_line);
+
+  return true;
 }

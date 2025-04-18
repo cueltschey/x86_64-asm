@@ -12,6 +12,8 @@
 #define MAX_SYMBOLS 256
 #define MAX_SECTIONS 10
 
+#define MAX_LINE_SIZE 1024
+
 typedef struct asm_state_s {
   // File paths
   const char *input_files[MAX_FILES];
@@ -52,5 +54,11 @@ char *get_asm_state_info(const asm_state_t *state);
 
 int add_symbol(asm_state_t *state, const char *name, uint16_t shndx,
                Elf64_Addr value, uint8_t type, uint8_t binding);
+
+bool assembler_run(asm_state_t *state);
+
+bool assemble_file(asm_state_t *state, size_t file_idx);
+
+bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]);
 
 #endif
