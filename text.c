@@ -29,12 +29,16 @@ bool define_label(asm_state_t *state, const char *label) {
 
 bool handle_directive(asm_state_t *state, char *tokens[10], size_t nof_tokens) {
   if (strcmp(tokens[0], ".file") == 0) {
-    add_symbol(state, tokens[1], SHN_ABS, 0, STT_FILE, STB_LOCAL);
+    add_symbol(state, strdup(tokens[1]), SHN_ABS, 0, STT_FILE, STB_LOCAL);
     return true;
   }
 
   if (strcmp(tokens[0], ".text") == 0) {
     state->parse_mode = TEXT;
+    elf_symbol_t *sym = NULL;
+    if ((sym = find_symbol(state, tokens[0])) == NULL)
+      add_symbol(state, strdup(tokens[0]), state->text_idx, 0, STT_SECTION,
+                 STB_LOCAL);
     return true;
   }
 
@@ -44,13 +48,22 @@ bool handle_directive(asm_state_t *state, char *tokens[10], size_t nof_tokens) {
   }
 
   if (strcmp(tokens[0], ".section") == 0) {
-    if (strcmp(tokens[1], ".rodata") == 0)
+    if (strcmp(tokens[1], ".rodata") == 0) {
       state->parse_mode = RODATA;
-    else if (strcmp(tokens[1], ".note.GNU-stack") == 0)
+      elf_symbol_t *sym = NULL;
+      if ((sym = find_symbol(state, tokens[1])) == NULL)
+        add_symbol(state, strdup(tokens[1]), state->rodata_idx, 0, STT_SECTION,
+                   STB_LOCAL);
+    } else if (strcmp(tokens[1], ".note.GNU-stack") == 0)
       state->parse_mode = GNU_STACK;
-    else if (strcmp(tokens[1], ".text") == 0)
+    else if (strcmp(tokens[1], ".text") == 0) {
       state->parse_mode = TEXT;
-    else {
+      elf_symbol_t *sym = NULL;
+      if ((sym = find_symbol(state, tokens[1])) == NULL)
+        add_symbol(state, strdup(tokens[1]), state->text_idx, 0, STT_SECTION,
+                   STB_LOCAL);
+
+    } else {
       fprintf(stderr, "unknown .section directive: %s", tokens[1]);
       return false;
     }
@@ -85,7 +98,8 @@ bool handle_directive(asm_state_t *state, char *tokens[10], size_t nof_tokens) {
       return false;
     }
     // Define the symbol as global
-    add_symbol(state, tokens[1], state->text_idx, 0, STT_NOTYPE, STB_GLOBAL);
+    add_symbol(state, strdup(tokens[1]), state->text_idx, 0, STT_NOTYPE,
+               STB_GLOBAL);
     return true;
   }
 
@@ -118,8 +132,11 @@ bool handle_directive(asm_state_t *state, char *tokens[10], size_t nof_tokens) {
     }
 
     uint8_t sym_type = STT_NOTYPE;
-    if (strcmp(tokens[2], "@function")) {
+    if (strcmp(tokens[2], "@function") == 0) {
       sym_type = STT_FUNC;
+    } else {
+      fprintf(stderr, ".type: Unknown type %s\n", tokens[2]);
+      return false;
     }
 
     sym->info = ELF64_ST_INFO(sym->global ? STB_GLOBAL : STB_LOCAL, sym_type);

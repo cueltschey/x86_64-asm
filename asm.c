@@ -529,6 +529,11 @@ bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
 }
 
 elf_symbol_t *find_symbol(asm_state_t *state, const char *name) {
+  if (!name) {
+    fprintf(stderr, "Error: find_symbol called with NULL name\n");
+    return NULL;
+  }
+
   elf_symbol_t *result = NULL;
   for (size_t i = 0; i < state->nof_symbols; i++) {
     if (strcmp(name, state->symbols[i].name) == 0) {
