@@ -179,6 +179,8 @@ void assembler_init(asm_state_t *state) {
   // Initialize string tables with the required initial NULL byte
   buffer_append(&state->sections[state->strtab_idx].content, "\0", 1);
   buffer_append(&state->sections[state->shstrtab_idx].content, "\0", 1);
+
+  state->nof_rodata_entries = 0;
 }
 
 void assembler_add_input_file(asm_state_t *state, const char *filename) {
@@ -475,7 +477,7 @@ bool tokenize_line(char *trimmed_line, char *tokens[10], size_t *nof_tokens) {
   char *word = trimmed_line;
 
   for (size_t char_idx = 0; char_idx < line_len; char_idx++) {
-    if (*p == ' ' || *p == 9) {
+    if (*p == ' ' || *p == 9 || *p == ',') {
       *p = '\0';
       if (strlen(word) > 0)
         tokens[(*nof_tokens)++] = strdup(word);
@@ -514,9 +516,14 @@ bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
   if (label) {
     switch (state->parse_mode) {
     case TEXT:
+      add_symbol(state, label, state->text_idx, 0, STT_FUNC, STB_LOCAL);
       break;
-    case RODATA:
+    case RODATA: {
+      rodata_label_t new_entry;
+      new_entry.name = label;
+      state->rodata_entries[state->nof_rodata_entries++] = new_entry;
       break;
+    }
     default:
       break;
     }
@@ -540,14 +547,38 @@ bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
   }
 
   if (strcmp(tokens[0], ".section") == 0) {
-    if (strcmp(tokens[1], ".rodata"))
+    if (strcmp(tokens[1], ".rodata") == 0)
       state->parse_mode = RODATA;
-    else if (strcmp(tokens[1], ".note.GNU-stack"))
+    else if (strcmp(tokens[1], ".note.GNU-stack") == 0)
       state->parse_mode = GNU_STACK;
-    else if (strcmp(tokens[1], ".text"))
+    else if (strcmp(tokens[1], ".text") == 0)
       state->parse_mode = TEXT;
-    else
+    else {
+      fprintf(stderr, "unknown .section directive: %s", tokens[1]);
       return false;
+    }
+    return true;
+  }
+
+  if (strcmp(tokens[0], ".string") == 0) {
+    if (state->parse_mode != RODATA) {
+      fprintf(stderr, "Encountered .string outside of rodata\n");
+      return false;
+    }
+    char *string = tokens[1] + 1;
+    // Combine all tokens
+    for (size_t i = 2; i < nof_tokens; i++) {
+      strcat(string, " ");
+      strcat(string, tokens[i]);
+    }
+
+    size_t tok_len = strlen(string);
+    string[tok_len - 1] = '\0';
+
+    state->rodata_entries[state->nof_rodata_entries - 1].offset =
+        state->sections[state->rodata_idx].size;
+    buffer_append(&state->sections[state->rodata_idx].content, string, tok_len);
+
     return true;
   }
 

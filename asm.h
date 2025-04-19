@@ -11,6 +11,7 @@
 
 #define MAX_SYMBOLS 256
 #define MAX_SECTIONS 10
+#define MAX_RODATA_ENTRIES 10
 
 #define MAX_LINE_SIZE 1024
 
@@ -22,7 +23,7 @@ typedef enum asm_mode_e {
 
 typedef struct rodata_label_s {
   const char *name;
-  uint8_t *data;
+  uint64_t offset;
 } rodata_label_t;
 
 typedef struct asm_state_s {
@@ -46,6 +47,10 @@ typedef struct asm_state_s {
   size_t strtab_idx;
   size_t shstrtab_idx;
   size_t rodata_idx;
+
+  // Label data
+  rodata_label_t rodata_entries[MAX_RODATA_ENTRIES];
+  size_t nof_rodata_entries;
 
   // ELF data
   elf_symbol_t symbols[MAX_SYMBOLS];
