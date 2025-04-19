@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -g -Werror -std=c99
 TARGET = x86_64-asm
-OBJS = main.o elf.o asm.o args.o
+OBJS = main.o elf.o asm.o args.o text.o
 
 all: $(TARGET)
 
@@ -19,6 +19,9 @@ asm.o: asm.c asm.h
 
 args.o: args.c args.h
 	$(CC) $(CFLAGS) -c args.c
+
+text.o: text.c text.h
+	$(CC) $(CFLAGS) -c text.c
 
 clean:
 	rm -f $(TARGET) $(OBJS) *.o core *.out output.o test.o

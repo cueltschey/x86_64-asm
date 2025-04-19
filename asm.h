@@ -83,4 +83,6 @@ bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]);
 
 bool tokenize_line(char *trimmed_line, char *tokens[10], size_t *nof_tokens);
 
+elf_symbol_t *find_symbol(asm_state_t *state, const char *name);
+
 #endif

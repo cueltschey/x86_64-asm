@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "asm.h"
 #include "elf.h"
+#include "text.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -508,26 +509,11 @@ bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
   if (colon) {
     *colon = '\0';
     label = trimmed_line;
-    trimmed_line = colon + 1;
-    while (isspace((unsigned char)*trimmed_line))
-      trimmed_line++;
-  }
-
-  if (label) {
-    switch (state->parse_mode) {
-    case TEXT:
-      add_symbol(state, label, state->text_idx, 0, STT_FUNC, STB_LOCAL);
-      break;
-    case RODATA: {
-      rodata_label_t new_entry;
-      new_entry.name = label;
-      state->rodata_entries[state->nof_rodata_entries++] = new_entry;
-      break;
-    }
-    default:
-      break;
-    }
-    return true;
+    // NOTE: skip .ident
+    if (label[1] == 'i' && label[2] == 'd')
+      return true;
+    printf("%s\n", label);
+    return define_label(state, label);
   }
 
   size_t nof_tokens = 0;
@@ -536,51 +522,19 @@ bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
     return false;
   }
 
-  if (strcmp(tokens[0], ".file") == 0) {
-    add_symbol(state, tokens[1], SHN_ABS, 0, STT_FILE, STB_LOCAL);
-    return true;
-  }
-
-  if (strcmp(tokens[0], ".text") == 0) {
-    state->parse_mode = TEXT;
-    return true;
-  }
-
-  if (strcmp(tokens[0], ".section") == 0) {
-    if (strcmp(tokens[1], ".rodata") == 0)
-      state->parse_mode = RODATA;
-    else if (strcmp(tokens[1], ".note.GNU-stack") == 0)
-      state->parse_mode = GNU_STACK;
-    else if (strcmp(tokens[1], ".text") == 0)
-      state->parse_mode = TEXT;
-    else {
-      fprintf(stderr, "unknown .section directive: %s", tokens[1]);
-      return false;
-    }
-    return true;
-  }
-
-  if (strcmp(tokens[0], ".string") == 0) {
-    if (state->parse_mode != RODATA) {
-      fprintf(stderr, "Encountered .string outside of rodata\n");
-      return false;
-    }
-    char *string = tokens[1] + 1;
-    // Combine all tokens
-    for (size_t i = 2; i < nof_tokens; i++) {
-      strcat(string, " ");
-      strcat(string, tokens[i]);
-    }
-
-    size_t tok_len = strlen(string);
-    string[tok_len - 1] = '\0';
-
-    state->rodata_entries[state->nof_rodata_entries - 1].offset =
-        state->sections[state->rodata_idx].size;
-    buffer_append(&state->sections[state->rodata_idx].content, string, tok_len);
-
-    return true;
-  }
+  if (tokens[0][0] == '.')
+    return handle_directive(state, tokens, nof_tokens);
 
   return true;
+}
+
+elf_symbol_t *find_symbol(asm_state_t *state, const char *name) {
+  elf_symbol_t *result = NULL;
+  for (size_t i = 0; i < state->nof_symbols; i++) {
+    if (strcmp(name, state->symbols[i].name) == 0) {
+      result = &state->symbols[i];
+      break;
+    }
+  }
+  return result;
 }
