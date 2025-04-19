@@ -154,6 +154,7 @@ void assembler_init(asm_state_t *state) {
   state->output_file = "a.out";
   state->current_file = 0;
   state->current_line = 0;
+  state->parse_mode = TEXT;
 
   state->text_idx = -1;
   state->note_idx = -1;
@@ -467,6 +468,27 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
   return ret;
 }
 
+bool tokenize_line(char *trimmed_line, char *tokens[10], size_t *nof_tokens) {
+  *nof_tokens = 0;
+  size_t line_len = strlen(trimmed_line);
+  char *p = trimmed_line;
+  char *word = trimmed_line;
+
+  for (size_t char_idx = 0; char_idx < line_len; char_idx++) {
+    if (*p == ' ' || *p == 9) {
+      *p = '\0';
+      if (strlen(word) > 0)
+        tokens[(*nof_tokens)++] = strdup(word);
+      word = p + 1;
+    }
+    p++;
+  }
+
+  tokens[(*nof_tokens)++] = strdup(word);
+
+  return *nof_tokens > 0;
+}
+
 bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
 
   char *tokens[10];
@@ -490,9 +512,13 @@ bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
   }
 
   if (label) {
-    printf("LABEL FOUND: %s\n", label);
-    if (strcmp(label, "main") == 0) {
-      add_symbol(state, label, state->text_idx, 0, STT_FUNC, STB_GLOBAL);
+    switch (state->parse_mode) {
+    case TEXT:
+      break;
+    case RODATA:
+      break;
+    default:
+      break;
     }
     return true;
   }
@@ -503,33 +529,27 @@ bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
     return false;
   }
 
-  printf("TOKENS: %ld, %s\n", nof_tokens, tokens[0]);
-
   if (strcmp(tokens[0], ".file") == 0) {
-    printf("HERE\n");
     add_symbol(state, tokens[1], SHN_ABS, 0, STT_FILE, STB_LOCAL);
     return true;
   }
-  return true;
-}
 
-bool tokenize_line(char *trimmed_line, char *tokens[10], size_t *nof_tokens) {
-  *nof_tokens = 0;
-  size_t line_len = strlen(trimmed_line);
-  char *p = trimmed_line;
-  char *word = trimmed_line;
-
-  for (size_t char_idx = 0; char_idx < line_len; char_idx++) {
-    if (*p == ' ' || *p == 9) {
-      *p = '\0';
-      if (strlen(word) > 0)
-        tokens[(*nof_tokens)++] = strdup(word);
-      word = p + 1;
-    }
-    p++;
+  if (strcmp(tokens[0], ".text") == 0) {
+    state->parse_mode = TEXT;
+    return true;
   }
 
-  tokens[(*nof_tokens)++] = strdup(word);
+  if (strcmp(tokens[0], ".section") == 0) {
+    if (strcmp(tokens[1], ".rodata"))
+      state->parse_mode = RODATA;
+    else if (strcmp(tokens[1], ".note.GNU-stack"))
+      state->parse_mode = GNU_STACK;
+    else if (strcmp(tokens[1], ".text"))
+      state->parse_mode = TEXT;
+    else
+      return false;
+    return true;
+  }
 
-  return *nof_tokens > 0;
+  return true;
 }

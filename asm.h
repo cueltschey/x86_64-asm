@@ -14,11 +14,25 @@
 
 #define MAX_LINE_SIZE 1024
 
+typedef enum asm_mode_e {
+  TEXT = 0,
+  RODATA,
+  GNU_STACK,
+} asm_mode_t;
+
+typedef struct rodata_label_s {
+  const char *name;
+  uint8_t *data;
+} rodata_label_t;
+
 typedef struct asm_state_s {
   // File paths
   const char *input_files[MAX_FILES];
   size_t nof_input_files;
   const char *output_file;
+
+  // What mode to parse
+  asm_mode_t parse_mode;
 
   // File position data
   uint64_t current_text_offset;
