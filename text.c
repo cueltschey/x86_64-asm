@@ -1,25 +1,59 @@
+#include "lex.h"
+#include "state.h"
+#include <elf.h>
+#include <stdio.h>
 #define _POSIX_C_SOURCE 200809L
 #include "text.h"
 
 int opcode_push(asm_state_t *state);
 
-bool define_label(asm_state_t *state, const char *label) {
+bool tok_is_label(int tok) { return tok == 0; }
+bool tok_is_directive(int tok) { return tok == 1; }
+
+bool handle_line(asm_state_t *state, int tokens[MAX_LINE_SIZE],
+                 size_t nof_tokens, char *opt_str) {
+
+  if (tok_is_label(tokens[0])) {
+    if (opt_str == NULL) {
+      fprintf(stderr, "Label parsed without any string\n");
+      return false;
+    }
+    return handle_label(state, tokens[0], opt_str);
+  }
+
+  if (tok_is_directive(tokens[0]))
+    return handle_directive(state, tokens, nof_tokens, opt_str);
+
+  if (!handle_machine_code(state, tokens, nof_tokens)) {
+    fprintf(stderr, ".text code parsing failed\n");
+    return false;
+  };
+
+  return true;
+}
+
+bool handle_label(asm_state_t *state, int label_tok, char *label_name) {
   switch (state->parse_mode) {
   case TEXT: {
-    // Ignore local labels
-    if (label[0] == '.' && label[1] == 'L')
+    // Ignore function labels
+    if (label_tok == TOK_FUNC_START || label_tok == TOK_FUNC_END)
       return true;
-    elf_symbol_t *sym = find_symbol(state, label);
+    elf_symbol_t *sym = find_symbol(state, label_name);
     if (sym == NULL) {
-      fprintf(stderr, ".text: No such symbol %s\n", label);
+      fprintf(stderr, ".text: No such symbol %s\n", label_name);
       return false;
     }
     sym->value = state->current_text_offset;
     break;
   }
   case RODATA: {
+    if (label_tok != TOK_RODATA_LABEL) {
+      fprintf(stderr, "Expected rodata constant label but got: %s\n",
+              label_name);
+      return false;
+    }
     rodata_label_t new_entry;
-    new_entry.name = label;
+    new_entry.name = label_name;
     state->rodata_entries[state->nof_rodata_entries++] = new_entry;
     break;
   }
@@ -29,96 +63,65 @@ bool define_label(asm_state_t *state, const char *label) {
   return true;
 }
 
-bool handle_directive(asm_state_t *state, char *tokens[10], size_t nof_tokens) {
-  if (strcmp(tokens[0], ".file") == 0) {
-    char *file_name = strdup(tokens[1]);
-    if (file_name[0] == '"')
-      file_name++;
-    if (file_name[strlen(file_name) - 1] == '"')
-      file_name[strlen(file_name) - 1] = '\0';
-    add_symbol(state, file_name, SHN_ABS, 0, STT_FILE, STB_LOCAL);
+bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
+                      size_t nof_tokens, char *directive_str) {
+  if (nof_tokens < 1)
+    return false;
+
+  switch (tokens[0]) {
+  case TOK_FILEHEADER: {
+    if (directive_str[0] == '"')
+      directive_str++;
+    if (directive_str[strlen(directive_str) - 1] == '"')
+      directive_str[strlen(directive_str) - 1] = '\0';
+    add_symbol(state, directive_str, SHN_ABS, 0, STT_FILE, STB_LOCAL);
     return true;
   }
-
-  if (strcmp(tokens[0], ".text") == 0) {
+  case TOK_SECTION_TEXT: {
     state->parse_mode = TEXT;
     elf_symbol_t *sym = NULL;
-    if ((sym = find_symbol(state, tokens[0])) == NULL)
-      add_symbol(state, strdup(tokens[0]), state->text_idx, 0, STT_SECTION,
+    if ((sym = find_symbol(state, directive_str)) == NULL)
+      add_symbol(state, directive_str, state->text_idx, 0, STT_SECTION,
                  STB_LOCAL);
     return true;
   }
-
-  if (tokens[0][1] == 'i' && tokens[0][2] == 'd') {
-    // NOTE: ignore ident for now
-    return true;
-  }
-
-  if (strcmp(tokens[0], ".section") == 0) {
-    if (strcmp(tokens[1], ".rodata") == 0) {
-      state->parse_mode = RODATA;
-      elf_symbol_t *sym = NULL;
-      if ((sym = find_symbol(state, tokens[1])) == NULL)
-        add_symbol(state, strdup(tokens[1]), state->rodata_idx, 0, STT_SECTION,
-                   STB_LOCAL);
-    } else if (strcmp(tokens[1], ".note.GNU-stack") == 0)
-      state->parse_mode = GNU_STACK;
-    else if (strcmp(tokens[1], ".text") == 0) {
-      state->parse_mode = TEXT;
-      elf_symbol_t *sym = NULL;
-      if ((sym = find_symbol(state, tokens[1])) == NULL)
-        add_symbol(state, strdup(tokens[1]), state->text_idx, 0, STT_SECTION,
-                   STB_LOCAL);
-
-    } else {
-      fprintf(stderr, "unknown .section directive: %s", tokens[1]);
-      return false;
-    }
-    return true;
-  }
-
-  if (strcmp(tokens[0], ".string") == 0) {
+  case TOK_STRINGDEF: {
     if (state->parse_mode != RODATA) {
       fprintf(stderr, "Encountered .string outside of rodata\n");
       return false;
     }
-    char *string = strdup(tokens[1] + 1);
-    // Combine all tokens
-    for (size_t i = 2; i < nof_tokens; i++) {
-      strcat(string, " ");
-      strcat(string, tokens[i]);
-    }
 
-    size_t tok_len = strlen(string);
-    string[tok_len - 1] = '\0';
+    if (directive_str[0] == '"')
+      directive_str++;
+    if (directive_str[strlen(directive_str) - 1] == '"')
+      directive_str[strlen(directive_str) - 1] = '\0';
 
     state->rodata_entries[state->nof_rodata_entries - 1].offset =
         state->sections[state->rodata_idx].size;
-    buffer_append(&state->sections[state->rodata_idx].content, string, tok_len);
+    buffer_append(&state->sections[state->rodata_idx].content, directive_str,
+                  strlen(directive_str));
 
     return true;
   }
-
-  if (strcmp(tokens[0], ".globl") == 0) {
+  case TOK_GLOBLDEF: {
     if (state->parse_mode != TEXT) {
       fprintf(stderr, "Encountered .globl outside of .text\n");
       return false;
     }
     // Define the symbol as global
-    add_symbol(state, strdup(tokens[1]), state->text_idx, 0, STT_NOTYPE,
+    add_symbol(state, directive_str, state->text_idx, 0, STT_NOTYPE,
                STB_GLOBAL);
     return true;
   }
-
-  if (strcmp(tokens[0], ".size") == 0) {
+  case TOK_SIZEDEF: {
     if (state->parse_mode != TEXT) {
       fprintf(stderr, "Encountered .size outside of .text\n");
       return false;
     }
 
-    elf_symbol_t *sym = find_symbol(state, tokens[1]);
+    elf_symbol_t *sym = find_symbol(state, directive_str);
     if (sym == NULL) {
-      fprintf(stderr, ".size: No such symbol %s\n", tokens[1]);
+      fprintf(stderr, ".size: No such symbol %s\n", directive_str);
       return false;
     }
 
@@ -126,48 +129,73 @@ bool handle_directive(asm_state_t *state, char *tokens[10], size_t nof_tokens) {
     return true;
   }
 
-  if (strcmp(tokens[0], ".type") == 0) {
+  case TOK_TYPEDEF: {
     if (state->parse_mode != TEXT) {
       fprintf(stderr, "Encountered .type outside of .text\n");
       return false;
     }
 
-    elf_symbol_t *sym = find_symbol(state, tokens[1]);
+    elf_symbol_t *sym = find_symbol(state, directive_str);
     if (sym == NULL) {
-      fprintf(stderr, ".type: No such symbol %s\n", tokens[1]);
+      fprintf(stderr, ".type: No such symbol %s\n", directive_str);
       return false;
     }
 
-    uint8_t sym_type = STT_NOTYPE;
-    if (strcmp(tokens[2], "@function") == 0) {
-      sym_type = STT_FUNC;
-    } else {
-      fprintf(stderr, ".type: Unknown type %s\n", tokens[2]);
-      return false;
-    }
+    uint8_t sym_type = STT_FUNC;
+    // TODO: other types
 
     sym->info = ELF64_ST_INFO(sym->global ? STB_GLOBAL : STB_LOCAL, sym_type);
     return true;
   }
-  // NOTE: ignore all .cfi instructions
-  if (tokens[0][1] == 'c' && tokens[0][2] == 'f' && tokens[0][3] == 'i')
-    return true;
 
-  fprintf(stderr, "Encountered unknown directive: %s\n", tokens[0]);
-  return false;
+  case TOK_SECTION:
+    // handle section below
+    break;
+  default:
+    fprintf(stderr, "Unexpected directive\n");
+    return false;
+  }
+
+  switch (tokens[1]) {
+  case TOK_SECTION_RODATA: {
+    state->parse_mode = RODATA;
+    elf_symbol_t *sym = NULL;
+    if ((sym = find_symbol(state, directive_str)) == NULL)
+      add_symbol(state, directive_str, state->rodata_idx, 0, STT_SECTION,
+                 STB_LOCAL);
+    return true;
+  }
+  case TOK_SECTION_GNUSTACK:
+    state->parse_mode = GNU_STACK;
+    return true;
+  case TOK_SECTION_TEXT: {
+    state->parse_mode = TEXT;
+    elf_symbol_t *sym = NULL;
+    if ((sym = find_symbol(state, directive_str)) == NULL)
+      add_symbol(state, directive_str, state->text_idx, 0, STT_SECTION,
+                 STB_LOCAL);
+    return true;
+  }
+  default:
+    fprintf(stderr, "unknown .section directive: %s", directive_str);
+    return false;
+  }
 }
 
-bool handle_machine_code(asm_state_t *state, char *tokens[10],
+bool handle_machine_code(asm_state_t *state, int tokens[MAX_LINE_SIZE],
                          size_t nof_tokens) {
   if (nof_tokens < 1)
     return false;
 
-  if (strcmp(tokens[0], "movq") == 0 || strcmp(tokens[0], "movl") == 0) {
+  switch (tokens[0]) {
+  case OPCODE_MOV:
     printf("Parsing mov... on line %ld\n", state->current_line);
     return true;
-  } else if (strcmp(tokens[0], "pushq") == 0) {
+  case OPCODE_PUSH:
     opcode_push(state);
     return true;
+  default:
+    break;
   }
 
   return true;

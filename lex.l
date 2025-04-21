@@ -19,7 +19,7 @@ int line_num = 0;
 ".ident"[^\n]*                ;
 
 
-\n                { line_num++; }
+\n        { line_num++; return TOK_NEWLINE; }
 
 \%rax     { return TOK_REG_RAX; }
 \%rbx     { return TOK_REG_RBX; }
@@ -200,6 +200,7 @@ leave             { return OPCODE_LEAVE; }
 ".data"           { return TOK_SECTION_DATA; }
 ".bss"            { return TOK_SECTION_BSS; }
 ".note.GNU-stack" { return TOK_SECTION_GNUSTACK; }
+".size"           { return TOK_SIZEDEF; }
 
 ".string"         { return TOK_STRINGDEF; }
 ".globl"          { return TOK_GLOBLDEF; }

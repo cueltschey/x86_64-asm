@@ -7,6 +7,8 @@ extern int line_num;
 extern char *yytext;
 extern FILE *yyin;
 
+#define TOK_NEWLINE 999
+
 #define TOK_FILEHEADER 300
 #define TOK_SECTION 301
 #define TOK_SECTION_TEXT 302
@@ -17,6 +19,7 @@ extern FILE *yyin;
 #define TOK_STRINGDEF 310
 #define TOK_GLOBLDEF 311
 #define TOK_TYPEDEF 312
+#define TOK_SIZEDEF 313
 
 #define TOK_SECTION_GNUSTACK 320
 
