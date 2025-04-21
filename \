@@ -32,8 +32,9 @@ bool handle_directive(asm_state_t *state, char *tokens[10], size_t nof_tokens) {
     char *file_name = strdup(tokens[1]);
     if (file_name[0] == '"')
       file_name++;
-    if (file_name[strlen(file_name) - 1] == '"')
-      file_name[strlen(file_name) - 1] = '\0';
+
+    if (file_name[0] == '"')
+      file_name++;
     add_symbol(state, file_name, SHN_ABS, 0, STT_FILE, STB_LOCAL);
     return true;
   }
