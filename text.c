@@ -1,6 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
 #include "text.h"
 
+int opcode_push(asm_state_t *state);
+
 bool define_label(asm_state_t *state, const char *label) {
   switch (state->parse_mode) {
   case TEXT: {
@@ -153,4 +155,32 @@ bool handle_directive(asm_state_t *state, char *tokens[10], size_t nof_tokens) {
 
   fprintf(stderr, "Encountered unknown directive: %s\n", tokens[0]);
   return false;
+}
+
+bool handle_machine_code(asm_state_t *state, char *tokens[10],
+                         size_t nof_tokens) {
+  if (nof_tokens < 1)
+    return false;
+
+  if (strcmp(tokens[0], "movq") == 0 || strcmp(tokens[0], "movl") == 0) {
+    printf("Parsing mov... on line %ld\n", state->current_line);
+    return true;
+  } else if (strcmp(tokens[0], "pushq") == 0) {
+    opcode_push(state);
+    return true;
+  }
+
+  return true;
+}
+
+int opcode_push(asm_state_t *state) {
+  int reg_code = 0;
+
+  uint8_t rex = REX_PREFIX_BASE;
+  rex |= REX_PREFIX_B;
+
+  uint8_t machine_code = 0x50 + reg_code;
+  buffer_append(&state->sections[state->text_idx].content, &machine_code, 1);
+
+  return 0;
 }

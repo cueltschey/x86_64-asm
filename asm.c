@@ -525,6 +525,11 @@ bool encode_instr(asm_state_t *state, char line_buffer[MAX_LINE_SIZE]) {
   if (tokens[0][0] == '.')
     return handle_directive(state, tokens, nof_tokens);
 
+  if (!handle_machine_code(state, tokens, nof_tokens)) {
+    fprintf(stderr, ".text code parsing failed\n");
+    return false;
+  };
+
   return true;
 }
 

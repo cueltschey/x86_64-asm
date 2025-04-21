@@ -1,7 +1,8 @@
 CC = gcc
+LEX = flex
 CFLAGS = -Wall -Wextra -g -Werror -std=c99
 TARGET = x86_64-asm
-OBJS = main.o elf.o asm.o args.o text.o
+OBJS = main.o elf.o asm.o args.o text.o lex.yy.o
 
 all: $(TARGET)
 
@@ -23,10 +24,18 @@ args.o: args.c args.h
 text.o: text.c text.h
 	$(CC) $(CFLAGS) -c text.c
 
-clean:
-	rm -f $(TARGET) $(OBJS) *.o core *.out output.o test.o
+lex.yy.o: lex.yy.c
+	$(CC) -c lex.yy.c
 
-test_asm: $(TARGET) test_asm/hello.s
+lex.yy.c: lex.l lex.h
+	$(LEX) lex.l
+
+
+
+clean:
+	rm -f $(TARGET) $(OBJS) *.o core *.out lex.yy.c
+
+test: $(TARGET) test_asm/hello.s
 	@echo "Testing with test_asm/hello.s"
 	./$(TARGET) test_asm/hello.s -o hello.o
 	@echo "--- readelf -a hello.o ---"

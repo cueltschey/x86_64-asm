@@ -1,0 +1,221 @@
+#ifndef LEX_H
+#define LEX_H
+
+#include <stdio.h>
+
+extern int line_num;
+extern char *yytext;
+extern FILE *yyin;
+
+#define TOK_FILEHEADER 300
+#define TOK_SECTION 301
+#define TOK_SECTION_TEXT 302
+#define TOK_SECTION_RODATA 303
+#define TOK_SECTION_DATA 304
+#define TOK_SECTION_BSS 305
+
+#define TOK_STRINGDEF 310
+#define TOK_GLOBLDEF 311
+#define TOK_TYPEDEF 312
+
+#define TOK_SECTION_GNUSTACK 320
+
+#define TOK_RODATA_LABEL 330
+#define TOK_FUNC_START 331
+#define TOK_FUNC_END 332
+#define TOK_MINUS 333
+#define TOK_OPENPAREN 334
+#define TOK_CLOSEPAREN 335
+
+#define TOK_HEX 400
+#define TOK_NUM 401
+#define TOK_IDENT 402
+#define TOK_STRLIT 403
+#define TOK_IDENT_TAG 405
+#define TOK_FUNCTION_TYPE 406
+#define TOK_COMMA 407
+#define TOK_PLT_FLAG 408
+
+#define TOK_UNKNOWN 500
+
+#define TOK_REG_RAX 600
+#define TOK_REG_RBX 601
+#define TOK_REG_RCX 602
+#define TOK_REG_RDX 603
+#define TOK_REG_RSI 604
+#define TOK_REG_RDI 605
+#define TOK_REG_RBP 606
+#define TOK_REG_RSP 607
+#define TOK_REG_R8 608
+#define TOK_REG_R9 609
+#define TOK_REG_R10 610
+#define TOK_REG_R11 611
+#define TOK_REG_R12 612
+#define TOK_REG_R13 613
+#define TOK_REG_R14 614
+#define TOK_REG_R15 615
+
+// 32-bit registers
+#define TOK_REG_EAX 620
+#define TOK_REG_EBX 621
+#define TOK_REG_ECX 622
+#define TOK_REG_EDX 623
+#define TOK_REG_ESI 624
+#define TOK_REG_EDI 625
+#define TOK_REG_EBP 626
+#define TOK_REG_ESP 627
+#define TOK_REG_R8D 628
+#define TOK_REG_R9D 629
+#define TOK_REG_R10D 630
+#define TOK_REG_R11D 631
+#define TOK_REG_R12D 632
+#define TOK_REG_R13D 633
+#define TOK_REG_R14D 634
+#define TOK_REG_R15D 635
+
+// 16-bit registers
+#define TOK_REG_AX 640
+#define TOK_REG_BX 641
+#define TOK_REG_CX 642
+#define TOK_REG_DX 643
+#define TOK_REG_SI 644
+#define TOK_REG_DI 645
+#define TOK_REG_BP 646
+#define TOK_REG_SP 647
+#define TOK_REG_R8W 648
+#define TOK_REG_R9W 649
+#define TOK_REG_R10W 650
+#define TOK_REG_R11W 651
+#define TOK_REG_R12W 652
+#define TOK_REG_R13W 653
+#define TOK_REG_R14W 654
+#define TOK_REG_R15W 655
+
+// 8-bit registers
+#define TOK_REG_AL 660
+#define TOK_REG_BL 661
+#define TOK_REG_CL 662
+#define TOK_REG_DL 663
+#define TOK_REG_SIL 664
+#define TOK_REG_DIL 665
+#define TOK_REG_BPL 666
+#define TOK_REG_SPL 667
+#define TOK_REG_R8B 668
+#define TOK_REG_R9B 669
+#define TOK_REG_R10B 670
+#define TOK_REG_R11B 671
+#define TOK_REG_R12B 672
+#define TOK_REG_R13B 673
+#define TOK_REG_R14B 674
+#define TOK_REG_R15B 675
+
+#define TOK_REG_RIP 680
+
+#define TOK_REG_CS 690
+#define TOK_REG_DS 691
+#define TOK_REG_ES 692
+#define TOK_REG_FS 693
+#define TOK_REG_GS 694
+#define TOK_REG_SS 695
+
+#define OPCODE_PUSH 0x50
+#define OPCODE_POP 0x58
+
+#define OPCODE_CALL 0xE8
+#define OPCODE_RET 0xC3
+#define OPCODE_JMP 0xE9
+#define OPCODE_JE 0x74
+#define OPCODE_JNE 0x75
+#define OPCODE_JG 0x7F
+#define OPCODE_JGE 0x7D
+#define OPCODE_JL 0x7C
+#define OPCODE_JLE 0x7E
+
+#define OPCODE_MOV 0x89
+#define OPCODE_LEAQ 0x8D
+#define OPCODE_LEAL 0x8D
+#define OPCODE_LEAW 0x8D
+
+#define OPCODE_ADDQ 0x01
+#define OPCODE_ADDL 0x03
+#define OPCODE_ADDW 0x66
+#define OPCODE_ADDB 0x00
+#define OPCODE_SUBQ 0x29
+#define OPCODE_SUBL 0x2B
+#define OPCODE_SUBW 0x66
+#define OPCODE_SUBB 0x28
+#define OPCODE_MULQ 0xF7
+#define OPCODE_MULL 0xF7
+#define OPCODE_MULW 0x66
+#define OPCODE_MULB 0xF6
+#define OPCODE_IMULQ 0x0F
+#define OPCODE_IMULL 0x69
+#define OPCODE_IMULW 0x66
+#define OPCODE_IMULB 0x6B
+#define OPCODE_DIVQ 0xF7
+#define OPCODE_DIVL 0xF7
+#define OPCODE_DIVW 0x66
+#define OPCODE_DIVB 0xF6
+#define OPCODE_IDIVQ 0xF7
+#define OPCODE_IDIVL 0xF7
+#define OPCODE_IDIVW 0x66
+#define OPCODE_IDIVB 0xF6
+
+#define OPCODE_ANDQ 0x21
+#define OPCODE_ANDL 0x23
+#define OPCODE_ANDW 0x66
+#define OPCODE_ANDB 0x20
+#define OPCODE_ORQ 0x09
+#define OPCODE_ORL 0x0B
+#define OPCODE_ORW 0x66
+#define OPCODE_ORB 0x08
+#define OPCODE_XORQ 0x31
+#define OPCODE_XORL 0x33
+#define OPCODE_XORW 0x66
+#define OPCODE_XORB 0x30
+#define OPCODE_NOTQ 0xF7
+#define OPCODE_NOTL 0xF7
+#define OPCODE_NOTW 0x66
+#define OPCODE_NOTB 0xF6
+#define OPCODE_NEGQ 0xF7
+#define OPCODE_NEGL 0xF7
+#define OPCODE_NEGW 0x66
+#define OPCODE_NEGB 0xF6
+
+#define OPCODE_SHLQ 0xD1
+#define OPCODE_SHLL 0xD3
+#define OPCODE_SHLW 0x66
+#define OPCODE_SHLB 0xD0
+#define OPCODE_SHRQ 0xD1
+#define OPCODE_SHRL 0xD3
+#define OPCODE_SHRW 0x66
+#define OPCODE_SHRB 0xD0
+#define OPCODE_SARQ 0xD1
+#define OPCODE_SARL 0xD3
+#define OPCODE_SARW 0x66
+#define OPCODE_SARB 0xD0
+#define OPCODE_ROLQ 0xC1
+#define OPCODE_ROLL 0xC1
+#define OPCODE_ROLW 0x66
+#define OPCODE_ROLB 0xC0
+#define OPCODE_RORQ 0xC1
+#define OPCODE_RORL 0xC1
+#define OPCODE_RORW 0x66
+#define OPCODE_RORB 0xC0
+
+#define OPCODE_CMPQ 0x39
+#define OPCODE_CMPL 0x3B
+#define OPCODE_CMPW 0x66
+#define OPCODE_CMPB 0x38
+#define OPCODE_TESTQ 0x85
+#define OPCODE_TESTL 0xA9
+#define OPCODE_TESTW 0x66
+#define OPCODE_TESTB 0x84
+
+#define OPCODE_NOP 0x90
+#define OPCODE_SYSCALL 0x0F05
+#define OPCODE_LEAVE 0xC9
+
+int yylex();
+
+#endif
