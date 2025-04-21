@@ -7,7 +7,10 @@
 
 int opcode_push(asm_state_t *state);
 
-bool tok_is_label(int tok) { return tok == 0; }
+bool tok_is_label(int tok) {
+  return tok == TOK_RODATA_LABEL || tok == TOK_FUNC_END ||
+         tok == TOK_FUNC_START || tok == TOK_IDENT_TAG;
+}
 bool tok_is_directive(int tok) { return tok == 1; }
 
 bool handle_line(asm_state_t *state, int tokens[MAX_LINE_SIZE],

@@ -29,6 +29,7 @@ extern FILE *yyin;
 #define TOK_MINUS 333
 #define TOK_OPENPAREN 334
 #define TOK_CLOSEPAREN 335
+#define TOK_RODATA_LABEL_REF 336
 
 #define TOK_HEX 400
 #define TOK_NUM 401

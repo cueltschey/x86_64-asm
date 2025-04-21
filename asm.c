@@ -117,7 +117,6 @@ bool assembler_run(asm_state_t *state) {
     return false;
   }
 
-  printf("Converting to Machine Code...\n");
   for (size_t i = 0; i < state->nof_input_files; i++) {
     if (!assemble_file(state, i)) {
       fprintf(stderr, "Translation failed in file %s line %d.\n",
@@ -137,6 +136,7 @@ bool assembler_run(asm_state_t *state) {
 }
 
 bool assemble_file(asm_state_t *state, size_t file_idx) {
+  printf("Assembling file: %s\n", state->input_files[file_idx]);
   yyin = fopen(state->input_files[file_idx], "r");
   if (!yyin) {
     perror("fopen failed");
@@ -154,13 +154,24 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
   size_t nof_tokens = 0;
 
   while ((current_token = yylex())) {
-    if (current_token == TOK_NEWLINE) {
-      handle_line(state, tokens, nof_tokens, opt_str);
+    switch (current_token) {
+    case TOK_NEWLINE: {
+      if (!handle_line(state, tokens, nof_tokens, opt_str)) {
+        fprintf(stderr, "%s line %d: parsing failed\n",
+                state->input_files[file_idx], line_num);
+        return false;
+      }
       nof_tokens = 0;
       opt_str = NULL;
+      break;
     }
-    if (current_token == TOK_STRLIT) {
+    case TOK_STRLIT:
       opt_str = strdup(yytext);
+      break;
+    case TOK_UNKNOWN:
+      fprintf(stderr, "%s line %d: Encountered unknown token %s\n",
+              state->input_files[file_idx], line_num, yytext);
+      return false;
     }
     tokens[nof_tokens++] = current_token;
   }

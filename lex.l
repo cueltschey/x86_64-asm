@@ -206,13 +206,18 @@ leave             { return OPCODE_LEAVE; }
 ".globl"          { return TOK_GLOBLDEF; }
 ".type"           { return TOK_TYPEDEF; }
 
-".LC"[0-9]+:       { return TOK_RODATA_LABEL; }
+".LC"[0-9]+:        { return TOK_RODATA_LABEL; }
 ".LFB"[0-9]+:       { return TOK_FUNC_START; }
 ".LFE"[0-9]+:       { return TOK_FUNC_END; }
+
+".LC"[0-9]+       { return TOK_RODATA_LABEL_REF; }
 
 "@function"       { return TOK_FUNCTION_TYPE; }
 ","               { return TOK_COMMA; }
 "@PLT"            { return TOK_PLT_FLAG; }
+
+".-"[a-zA-Z_]* ;
+"@progbits" ;
 
 
 
@@ -223,6 +228,7 @@ leave             { return OPCODE_LEAVE; }
 \'[^\']*\'        { return TOK_STRLIT; }
 "0x"[0-9A-Fa-f]+  { return TOK_HEX; }
 [0-9]+            { return TOK_NUM; }
+\$[0-9]+          { return TOK_NUM; }
 [a-zA-Z_][a-zA-Z0-9_]*":"  { return TOK_IDENT_TAG; }
 [a-zA-Z_][a-zA-Z0-9_]*  { return TOK_IDENT; }
 ";"[^\n]*         ;
