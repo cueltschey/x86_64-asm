@@ -427,21 +427,217 @@ bool is_token_8bit(int token) {
   }
 }
 
+int get_rm_reg_bits_from_reg(int tok) {
+  switch (tok) {
+  // 64-bit registers
+  case TOK_REG_RAX:
+    return 0;
+  case TOK_REG_RCX:
+    return 1;
+  case TOK_REG_RDX:
+    return 2;
+  case TOK_REG_RBX:
+    return 3;
+  case TOK_REG_RSP:
+    return 4;
+  case TOK_REG_RBP:
+    return 5;
+  case TOK_REG_RSI:
+    return 6;
+  case TOK_REG_RDI:
+    return 7;
+  case TOK_REG_R8:
+    return 0;
+  case TOK_REG_R9:
+    return 1;
+  case TOK_REG_R10:
+    return 2;
+  case TOK_REG_R11:
+    return 3;
+  case TOK_REG_R12:
+    return 4;
+  case TOK_REG_R13:
+    return 5;
+  case TOK_REG_R14:
+    return 6;
+  case TOK_REG_R15:
+    return 7;
+
+  // 32-bit registers
+  case TOK_REG_EAX:
+    return 0;
+  case TOK_REG_ECX:
+    return 1;
+  case TOK_REG_EDX:
+    return 2;
+  case TOK_REG_EBX:
+    return 3;
+  case TOK_REG_ESP:
+    return 4;
+  case TOK_REG_EBP:
+    return 5;
+  case TOK_REG_ESI:
+    return 6;
+  case TOK_REG_EDI:
+    return 7;
+  case TOK_REG_R8D:
+    return 0;
+  case TOK_REG_R9D:
+    return 1;
+  case TOK_REG_R10D:
+    return 2;
+  case TOK_REG_R11D:
+    return 3;
+  case TOK_REG_R12D:
+    return 4;
+  case TOK_REG_R13D:
+    return 5;
+  case TOK_REG_R14D:
+    return 6;
+  case TOK_REG_R15D:
+    return 7;
+
+  // 16-bit registers
+  case TOK_REG_AX:
+    return 0;
+  case TOK_REG_CX:
+    return 1;
+  case TOK_REG_DX:
+    return 2;
+  case TOK_REG_BX:
+    return 3;
+  case TOK_REG_SP:
+    return 4;
+  case TOK_REG_BP:
+    return 5;
+  case TOK_REG_SI:
+    return 6;
+  case TOK_REG_DI:
+    return 7;
+  case TOK_REG_R8W:
+    return 0;
+  case TOK_REG_R9W:
+    return 1;
+  case TOK_REG_R10W:
+    return 2;
+  case TOK_REG_R11W:
+    return 3;
+  case TOK_REG_R12W:
+    return 4;
+  case TOK_REG_R13W:
+    return 5;
+  case TOK_REG_R14W:
+    return 6;
+  case TOK_REG_R15W:
+    return 7;
+
+  // 8-bit registers
+  case TOK_REG_AL:
+    return 0;
+  case TOK_REG_CL:
+    return 1;
+  case TOK_REG_DL:
+    return 2;
+  case TOK_REG_BL:
+    return 3;
+  case TOK_REG_SPL:
+    return 4;
+  case TOK_REG_BPL:
+    return 5;
+  case TOK_REG_SIL:
+    return 6;
+  case TOK_REG_DIL:
+    return 7;
+  case TOK_REG_R8B:
+    return 0;
+  case TOK_REG_R9B:
+    return 1;
+  case TOK_REG_R10B:
+    return 2;
+  case TOK_REG_R11B:
+    return 3;
+  case TOK_REG_R12B:
+    return 4;
+  case TOK_REG_R13B:
+    return 5;
+  case TOK_REG_R14B:
+    return 6;
+  case TOK_REG_R15B:
+    return 7;
+
+  default:
+    return -1; // Invalid or unsupported register
+  }
+}
+
+bool parse_mov_operand(int tokens[MAX_LINE_SIZE], size_t *tok_idx, int *reg,
+                       int *displacement, bool *minus) {
+  if (tokens[(*tok_idx)] == TOK_MINUS) {
+    (*tok_idx)++;
+    *minus = true;
+  }
+  if (tokens[(*tok_idx)] == TOK_NUM) {
+    // TODO: get offset
+    *displacement = 8;
+    (*tok_idx)++;
+    if (tokens[(*tok_idx)++] == TOK_OPENPAREN) {
+      *reg = tokens[(*tok_idx)++];
+      if (tokens[(*tok_idx)++] != TOK_CLOSEPAREN) {
+        fprintf(stderr, "expected )\n");
+        return false;
+      }
+      return true;
+    }
+  }
+  *reg = tokens[(*tok_idx)++];
+  return true;
+}
+
 int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE],
                size_t nof_tokens) {
-
-  if (nof_tokens != 3) {
-    fprintf(stderr, "mov encoding failed: expected 3 operands, but got %ld\n",
-            nof_tokens);
-    // TODO: handle offsets
-    // return false;
-    return true;
+  if (nof_tokens < 3) {
+    fprintf(stderr, "mov failed: not enough operands\n");
+    return false;
   }
+
   size_t machine_code_len = 0;
   uint8_t *machine_code = malloc(3);
+  int reg_token = -1, rm_token = -1;
+  bool reg_minus = false, rm_minus = false;
+  int reg_disp = 0, rm_disp = 0;
 
-  int reg_token = tokens[1];
-  int rm_token = tokens[2];
+  size_t tok_idx = 1;
+  parse_mov_operand(tokens, &tok_idx, &reg_token, &reg_disp, &reg_minus);
+  printf("DEBUG: %ld\n", tok_idx);
+  parse_mov_operand(tokens, &tok_idx, &rm_token, &rm_disp, &rm_minus);
+
+  reg_disp = reg_minus ? -reg_disp : reg_disp;
+  rm_disp = rm_minus ? -rm_disp : rm_disp;
+
+  if (reg_disp > 0 && rm_disp > 0) {
+    fprintf(stderr, "mov failed: both operands have a displacement\n");
+    return false;
+  }
+
+  printf("DEBUG: reg: %d, rm: %d, reg_disp: %d, rm_disp: %d\n", reg_token,
+         rm_token, reg_disp, rm_disp);
+
+  int mod_bits;
+  int displacement = rm_disp > 0 ? rm_disp : reg_disp;
+  if (displacement == 0)
+    mod_bits = 0b00;
+  if (displacement >= -128 && displacement <= 127)
+    mod_bits = 0b01;
+  else
+    mod_bits = 0b11;
+  int reg_bits = get_rm_reg_bits_from_reg(reg_token);
+  int rm_bits = get_rm_reg_bits_from_reg(rm_token);
+  if (reg_bits < 0 || rm_bits < 0) {
+    fprintf(stderr, "mov failed: could not get reg or rm bits from register\n");
+    return false;
+  }
+  uint8_t modrm_byte = ((mod_bits & 0b00000011) << 6) |
+                       ((reg_bits & 0b00000011) << 3) | (rm_bits & 0b00000011);
 
   // Add REX if required
   if (is_token_64bit(reg_token) || is_token_64bit(rm_token)) {
@@ -457,13 +653,15 @@ int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE],
 
     if (is_extended_reg(rm_token))
       rex |= REX_PREFIX_B;
-
     if (is_rex_required_special(reg_token) || is_rex_required_special(rm_token))
       rex |= 0;
     machine_code[machine_code_len++] = rex;
   }
-
+  // Add opcode
   machine_code[machine_code_len++] = 0x89;
+
+  // Add Mod R/M byte
+  machine_code[machine_code_len++] = modrm_byte;
 
   buffer_append(&state->sections[state->text_idx].content, machine_code,
                 machine_code_len);
