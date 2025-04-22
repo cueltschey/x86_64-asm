@@ -1,7 +1,9 @@
 #include "lex.h"
 #include "state.h"
 #include <elf.h>
+#include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 #define _POSIX_C_SOURCE 200809L
 #include "text.h"
 
@@ -11,28 +13,37 @@ bool tok_is_label(int tok) {
   return tok == TOK_RODATA_LABEL || tok == TOK_FUNC_END ||
          tok == TOK_FUNC_START || tok == TOK_IDENT_TAG;
 }
-bool tok_is_directive(int tok) { return tok == 1; }
+bool tok_is_directive(int tok) {
+  return tok >= TOK_FILEHEADER && tok <= TOK_SECTION_GNUSTACK;
+}
+
+bool tok_is_machine_code(int tok) {
+  return tok >= OPCODE_ADDQ && tok <= OPCODE_MULQ;
+}
 
 bool handle_line(asm_state_t *state, int tokens[MAX_LINE_SIZE],
                  size_t nof_tokens, char *opt_str) {
-
-  if (tok_is_label(tokens[0])) {
-    if (opt_str == NULL) {
-      fprintf(stderr, "Label parsed without any string\n");
-      return false;
-    }
-    return handle_label(state, tokens[0], opt_str);
+  printf("Processing line %d: ", line_num);
+  for (size_t i = 0; i < nof_tokens; i++) {
+    printf("%d ", tokens[i]);
   }
+  printf("\n");
+
+  // ignore blank lines
+  if (nof_tokens < 1)
+    return true;
+
+  if (tok_is_label(tokens[0]))
+    return handle_label(state, tokens[0], opt_str);
 
   if (tok_is_directive(tokens[0]))
     return handle_directive(state, tokens, nof_tokens, opt_str);
 
-  if (!handle_machine_code(state, tokens, nof_tokens)) {
-    fprintf(stderr, ".text code parsing failed\n");
-    return false;
-  };
+  if (tok_is_machine_code(tokens[0]))
+    return handle_machine_code(state, tokens, nof_tokens);
 
-  return true;
+  fprintf(stderr, "Encountered bad token: %d\n", tokens[0]);
+  return false;
 }
 
 bool handle_label(asm_state_t *state, int label_tok, char *label_name) {
@@ -41,6 +52,9 @@ bool handle_label(asm_state_t *state, int label_tok, char *label_name) {
     // Ignore function labels
     if (label_tok == TOK_FUNC_START || label_tok == TOK_FUNC_END)
       return true;
+    // remove colon
+    if (label_tok == TOK_IDENT_TAG)
+      label_name[strlen(label_name) - 1] = '\0';
     elf_symbol_t *sym = find_symbol(state, label_name);
     if (sym == NULL) {
       fprintf(stderr, ".text: No such symbol %s\n", label_name);
@@ -83,9 +97,8 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
   case TOK_SECTION_TEXT: {
     state->parse_mode = TEXT;
     elf_symbol_t *sym = NULL;
-    if ((sym = find_symbol(state, directive_str)) == NULL)
-      add_symbol(state, directive_str, state->text_idx, 0, STT_SECTION,
-                 STB_LOCAL);
+    if ((sym = find_symbol(state, ".text")) == NULL)
+      add_symbol(state, ".text", state->text_idx, 0, STT_SECTION, STB_LOCAL);
     return true;
   }
   case TOK_STRINGDEF: {
@@ -163,8 +176,8 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
   case TOK_SECTION_RODATA: {
     state->parse_mode = RODATA;
     elf_symbol_t *sym = NULL;
-    if ((sym = find_symbol(state, directive_str)) == NULL)
-      add_symbol(state, directive_str, state->rodata_idx, 0, STT_SECTION,
+    if ((sym = find_symbol(state, ".rodata")) == NULL)
+      add_symbol(state, ".rodata", state->rodata_idx, 0, STT_SECTION,
                  STB_LOCAL);
     return true;
   }
@@ -174,9 +187,8 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
   case TOK_SECTION_TEXT: {
     state->parse_mode = TEXT;
     elf_symbol_t *sym = NULL;
-    if ((sym = find_symbol(state, directive_str)) == NULL)
-      add_symbol(state, directive_str, state->text_idx, 0, STT_SECTION,
-                 STB_LOCAL);
+    if ((sym = find_symbol(state, ".text")) == NULL)
+      add_symbol(state, ".text", state->text_idx, 0, STT_SECTION, STB_LOCAL);
     return true;
   }
   default:

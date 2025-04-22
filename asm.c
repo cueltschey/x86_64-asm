@@ -163,9 +163,12 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
       }
       nof_tokens = 0;
       opt_str = NULL;
-      break;
+      continue;
     }
     case TOK_STRLIT:
+    case TOK_RODATA_LABEL:
+    case TOK_IDENT:
+    case TOK_IDENT_TAG:
       opt_str = strdup(yytext);
       break;
     case TOK_UNKNOWN:
