@@ -165,6 +165,8 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
       opt_str = NULL;
       continue;
     }
+    case TOK_COMMA:
+      continue; // ignore commas
     case TOK_STRLIT:
     case TOK_RODATA_LABEL:
     case TOK_IDENT:
