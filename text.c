@@ -2,12 +2,15 @@
 #include "state.h"
 #include <elf.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #define _POSIX_C_SOURCE 200809L
 #include "text.h"
 
-int opcode_push(asm_state_t *state);
+int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
+                size_t nof_tokens);
 
 bool tok_is_label(int tok) {
   return tok == TOK_RODATA_LABEL || tok == TOK_FUNC_END ||
@@ -207,8 +210,7 @@ bool handle_machine_code(asm_state_t *state, int tokens[MAX_LINE_SIZE],
     printf("Parsing mov... on line %ld\n", state->current_line);
     return true;
   case OPCODE_PUSH:
-    opcode_push(state);
-    return true;
+    return opcode_push(state, tokens, nof_tokens);
   default:
     break;
   }
@@ -216,14 +218,104 @@ bool handle_machine_code(asm_state_t *state, int tokens[MAX_LINE_SIZE],
   return true;
 }
 
-int opcode_push(asm_state_t *state) {
-  int reg_code = 0;
+int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
+                size_t nof_tokens) {
+  if (nof_tokens != 2) {
+    fprintf(stderr, "push encoding failed: expected 2 operands but got %ld\n",
+            nof_tokens);
+    return false;
+  }
+  size_t machine_code_len = 0;
+  uint8_t *machine_code = malloc(2);
 
-  uint8_t rex = REX_PREFIX_BASE;
-  rex |= REX_PREFIX_B;
+  switch (tokens[1]) {
+  // Legacy 64-bit registers: opcode = 0x50 + reg
+  case TOK_REG_RAX:
+    machine_code[0] = 0x50;
+    machine_code_len = 1;
+    break;
+  case TOK_REG_RCX:
+    machine_code[0] = 0x51;
+    machine_code_len = 1;
+    break;
+  case TOK_REG_RDX:
+    machine_code[0] = 0x52;
+    machine_code_len = 1;
+    break;
+  case TOK_REG_RBX:
+    machine_code[0] = 0x53;
+    machine_code_len = 1;
+    break;
+  case TOK_REG_RSP:
+    machine_code[0] = 0x54;
+    machine_code_len = 1;
+    break;
+  case TOK_REG_RBP:
+    machine_code[0] = 0x55;
+    machine_code_len = 1;
+    break;
+  case TOK_REG_RSI:
+    machine_code[0] = 0x56;
+    machine_code_len = 1;
+    break;
+  case TOK_REG_RDI:
+    machine_code[0] = 0x57;
+    machine_code_len = 1;
+    break;
 
-  uint8_t machine_code = 0x50 + reg_code;
-  buffer_append(&state->sections[state->text_idx].content, &machine_code, 1);
+  // Extended registers (r8–r15): need REX prefix + opcode
+  case TOK_REG_R8:
+    machine_code[0] = 0x41;
+    machine_code[1] = 0x50;
+    machine_code_len = 2;
+    break;
+  case TOK_REG_R9:
+    machine_code[0] = 0x41;
+    machine_code[1] = 0x51;
+    machine_code_len = 2;
+    break;
+  case TOK_REG_R10:
+    machine_code[0] = 0x41;
+    machine_code[1] = 0x52;
+    machine_code_len = 2;
+    break;
+  case TOK_REG_R11:
+    machine_code[0] = 0x41;
+    machine_code[1] = 0x53;
+    machine_code_len = 2;
+    break;
+  case TOK_REG_R12:
+    machine_code[0] = 0x41;
+    machine_code[1] = 0x54;
+    machine_code_len = 2;
+    break;
+  case TOK_REG_R13:
+    machine_code[0] = 0x41;
+    machine_code[1] = 0x55;
+    machine_code_len = 2;
+    break;
+  case TOK_REG_R14:
+    machine_code[0] = 0x41;
+    machine_code[1] = 0x56;
+    machine_code_len = 2;
+    break;
+  case TOK_REG_R15:
+    machine_code[0] = 0x41;
+    machine_code[1] = 0x57;
+    machine_code_len = 2;
+    break;
 
-  return 0;
+  default:
+    fprintf(stderr, "push encoding failed: unsupported operand token: %d\n",
+            tokens[1]);
+    free(machine_code);
+    return false;
+  }
+
+  buffer_append(&state->sections[state->text_idx].content, machine_code,
+                machine_code_len);
+
+  free(machine_code);
+
+  return true;
 }
