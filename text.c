@@ -2,11 +2,6 @@
 #include "elf.h"
 #include "lex.h"
 #include "state.h"
-#include <elf.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/types.h>
 
 // Opcode handlers
 int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
@@ -76,8 +71,22 @@ bool handle_label(asm_state_t *state, int label_tok, char *label_name) {
   switch (state->parse_mode) {
   case TEXT: {
     // Ignore function labels
-    if (label_tok == TOK_FUNC_START || label_tok == TOK_FUNC_END)
+    if (label_tok == TOK_FUNC_START)
       return true;
+    if (label_tok == TOK_FUNC_END) {
+      elf_symbol_t *function_sym = NULL;
+      for (size_t i = 0; i < state->nof_symbols; i++) {
+        printf("DEBUG: %ld %s\n", i, state->symbols[i].name);
+        if ((state->symbols[i].info & 0xf) == STT_FUNC) {
+          function_sym = &state->symbols[i];
+        }
+      }
+      if (function_sym == NULL)
+        return true;
+      function_sym->size =
+          state->sections[state->text_idx].content.size - function_sym->value;
+      return true;
+    }
     // remove colon
     if (label_tok == TOK_IDENT_TAG)
       label_name[strlen(label_name) - 1] = '\0';
@@ -943,7 +952,11 @@ int opcode_lea(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
   uint8_t *machine_code = malloc(3);
   size_t machine_code_len = 0;
 
-  add_rex_if_required(reg_token, rm_token, machine_code, &machine_code_len);
+  if (is_token_64bit(rm_token) || is_token_64bit(reg_token)) {
+    uint8_t rex_byte = REX_PREFIX_BASE | REX_PREFIX_W;
+    machine_code[machine_code_len++] = rex_byte;
+  }
+
   uint8_t opcode_byte = 0x8d;
   machine_code[machine_code_len++] = opcode_byte;
 

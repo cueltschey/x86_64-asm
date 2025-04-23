@@ -4,9 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// sub
-// lea
-// call
+// add rela to ELF
 
 int main(int argc, char **argv) {
   asm_state_t state = {};

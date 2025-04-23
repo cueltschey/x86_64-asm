@@ -97,6 +97,7 @@ typedef struct asm_state_s {
   size_t nof_symbols;
   elf_section_t sections[MAX_SECTIONS];
   size_t nof_sections;
+
 } asm_state_t;
 
 #endif
