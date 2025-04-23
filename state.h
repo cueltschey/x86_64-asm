@@ -8,6 +8,7 @@
 #define MAX_SECTIONS 10
 #define MAX_RODATA_ENTRIES 10
 #define MAX_LINE_SIZE 20
+#define MAX_RELA 20
 
 #include <elf.h>
 #include <fcntl.h>
@@ -61,6 +62,20 @@ typedef enum asm_mode_e {
   GNU_STACK,
 } asm_mode_t;
 
+typedef enum {
+  RELOC_ABSOLUTE,
+  RELOC_PC_RELATIVE,
+  RELOC_GOT,
+  RELOC_PLT,
+} reloc_type_t;
+
+typedef struct elf_reloc_s {
+  size_t offset;
+  reloc_type_t type;
+  const char *symbol;
+  int64_t addend;
+} elf_reloc_t;
+
 typedef struct rodata_label_s {
   const char *name;
   uint64_t offset;
@@ -87,6 +102,7 @@ typedef struct asm_state_s {
   size_t strtab_idx;
   size_t shstrtab_idx;
   size_t rodata_idx;
+  size_t rela_text_idx;
 
   // Label data
   rodata_label_t rodata_entries[MAX_RODATA_ENTRIES];
@@ -97,6 +113,8 @@ typedef struct asm_state_s {
   size_t nof_symbols;
   elf_section_t sections[MAX_SECTIONS];
   size_t nof_sections;
+  elf_reloc_t relocations[MAX_RELA];
+  size_t nof_relocations;
 
 } asm_state_t;
 

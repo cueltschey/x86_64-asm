@@ -20,11 +20,12 @@ void assembler_init(asm_state_t *state) {
   state->strtab_idx = -1;
   state->shstrtab_idx = -1;
   state->rodata_idx = -1;
+  state->rela_text_idx = -1;
 
   // Add mandatory NULL section
   add_section(state, "", SHT_NULL, 0, 0, 0); // Section 0 is always NULL
-
   add_section(state, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 4, 0);
+  add_section(state, ".rela.text", SHT_RELA, SHF_INFO_LINK, 4, 0);
   add_section(state, ".rodata", SHT_PROGBITS, SHF_ALLOC, 4, 0);
   add_section(state, ".note.GNU-stack", SHT_PROGBITS, 0, 1, 0);
   add_section(state, ".symtab", SHT_SYMTAB, 0, 8, sizeof(Elf64_Sym));

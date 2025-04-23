@@ -43,7 +43,7 @@ test: $(TARGET) test_asm/hello.s
 	@echo "--- objdump -d hello.o ---"
 	@objdump -d hello.o
 	@echo "--- Linking hello.o ---"
-	ld hello.o -o hello_exec
+	gcc hello.o -o hello_exec
 	@echo "--- Running ./test_exec ; echo \$$? ---"
 	./hello_exec
 	@echo $$?

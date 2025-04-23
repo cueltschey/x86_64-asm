@@ -1,4 +1,8 @@
+#define _POSIX_C_SOURCE 200809L
 #include "elf.h"
+#include "state.h"
+#include <elf.h>
+#include <string.h>
 
 void buffer_init(asm_buf_t *buf) {
   buf->data = NULL;
@@ -123,6 +127,8 @@ void add_section(asm_state_t *state, const char *name, Elf64_Word type,
 
   if (strcmp(name, ".text") == 0)
     state->text_idx = state->nof_sections;
+  else if (strcmp(name, ".rela.text") == 0)
+    state->rela_text_idx = state->nof_sections;
   else if (strcmp(name, ".note.GNU-stack") == 0)
     state->note_idx = state->nof_sections;
   else if (strcmp(name, ".symtab") == 0)
@@ -135,6 +141,17 @@ void add_section(asm_state_t *state, const char *name, Elf64_Word type,
     state->rodata_idx = state->nof_sections;
 
   state->nof_sections++;
+}
+
+void add_rela(asm_state_t *state, const char *rela_name, size_t offset,
+              reloc_type_t type, int64_t addend) {
+  elf_reloc_t rela;
+  memset(&rela, 0, sizeof(elf_reloc_t));
+  rela.addend = addend;
+  rela.type = type;
+  rela.offset = offset;
+  rela.symbol = strdup(rela_name);
+  state->relocations[state->nof_relocations++] = rela;
 }
 
 void build_elf_strtab_symtab(asm_state_t *state) {
@@ -187,6 +204,46 @@ void build_elf_strtab_symtab(asm_state_t *state) {
   symtab_sec->size = symtab_sec->content.size;
 }
 
+void build_elf_rela(asm_state_t *state) {
+  elf_section_t *rela_sec = &state->sections[state->rela_text_idx];
+  rela_sec->entsize = sizeof(Elf64_Rela);
+  rela_sec->info = state->text_idx;
+  rela_sec->link = state->symtab_idx;
+  elf_section_t *text_sec = &state->sections[state->text_idx];
+  for (size_t i = 0; i < state->nof_relocations; i++) {
+    const elf_reloc_t *r = &state->relocations[i];
+    Elf64_Rela rela;
+    memset(&rela, 0, sizeof(rela));
+    rela.r_offset = text_sec->addr + r->offset;
+    uint32_t rel_type;
+    switch (r->type) {
+    case RELOC_ABSOLUTE:
+      rel_type = R_X86_64_64;
+      break;
+    case RELOC_PC_RELATIVE:
+      rel_type = R_X86_64_PC32;
+      break;
+    case RELOC_PLT:
+      rel_type = R_X86_64_PLT32;
+      break;
+    default:
+      fprintf(stderr, "Unknown relocation type: %d\n", r->type);
+    }
+
+    // Find the symbols index
+    size_t symbol_idx = 0;
+    for (size_t j = 0; j < state->nof_symbols; j++) {
+      if (strcmp(state->symbols[j].name, r->symbol) == 0) {
+        symbol_idx = j;
+        break;
+      }
+    }
+    rela.r_info = ELF64_R_INFO(symbol_idx, rel_type);
+    rela.r_addend = r->addend;
+    buffer_append(&rela_sec->content, &rela, sizeof(Elf64_Rela));
+  }
+}
+
 bool write_elf_object_file(asm_state_t *state) {
   // Write all section names to shstrtab
   // Assign correct sh_name to each section
@@ -203,6 +260,7 @@ bool write_elf_object_file(asm_state_t *state) {
 
   // Add strtab and symtab data
   build_elf_strtab_symtab(state);
+  build_elf_rela(state);
 
   Elf64_Ehdr elf_header;
   Elf64_Shdr *section_headers = calloc(state->nof_sections, sizeof(Elf64_Shdr));

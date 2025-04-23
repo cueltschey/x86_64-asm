@@ -2,6 +2,7 @@
 #define ELF_H
 
 #include "state.h"
+#include <stdint.h>
 
 void buffer_init(asm_buf_t *buf);
 
@@ -19,7 +20,11 @@ int add_symbol(asm_state_t *state, const char *name, uint16_t shndx,
 void add_section(asm_state_t *state, const char *name, Elf64_Word type,
                  Elf64_Xword flags, Elf64_Xword addralign, Elf64_Xword entsize);
 
+void add_rela(asm_state_t *state, const char *rela_name, size_t offset,
+              reloc_type_t type, int64_t addend);
+
 void build_elf_strtab_symtab(asm_state_t *state);
+void build_elf_rela(asm_state_t *state);
 
 bool write_elf_object_file(asm_state_t *state);
 

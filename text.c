@@ -2,6 +2,7 @@
 #include "elf.h"
 #include "lex.h"
 #include "state.h"
+#include <elf.h>
 
 // Opcode handlers
 int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
@@ -910,7 +911,7 @@ int opcode_call(asm_state_t *state, int tokens[MAX_LINE_SIZE],
 
   elf_symbol_t *sym = NULL;
   if ((sym = find_symbol(state, called_function)) == NULL)
-    add_symbol(state, called_function, SHN_ABS, 0, STT_NOTYPE, STB_GLOBAL);
+    add_symbol(state, called_function, SHN_UNDEF, 0, STT_NOTYPE, STB_GLOBAL);
 
   buffer_append(&state->sections[state->text_idx].content, &machine_code, 5);
 
