@@ -2,6 +2,7 @@
 #include "elf.h"
 #include "lex.h"
 #include "state.h"
+#include <elf.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/types.h>
@@ -11,6 +12,12 @@ int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
                 size_t nof_tokens);
 int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
                char *input_strings[10], size_t nof_input_strings);
+
+int opcode_sub(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
+               char *input_strings[10], size_t nof_input_strings);
+int opcode_call(asm_state_t *state, int tokens[MAX_LINE_SIZE],
+                size_t nof_tokens, char *input_strings[10],
+                size_t nof_input_strings);
 
 bool tok_is_label(int tok) {
   return tok == TOK_RODATA_LABEL || tok == TOK_FUNC_END ||
@@ -220,6 +227,15 @@ bool handle_machine_code(asm_state_t *state, int tokens[MAX_LINE_SIZE],
   case OPCODE_MOV:
     return opcode_mov(state, tokens, nof_tokens, input_strings,
                       nof_input_strings);
+  case OPCODE_SUBB:
+  case OPCODE_SUBL:
+  case OPCODE_SUBW:
+  case OPCODE_SUBQ:
+    return opcode_sub(state, tokens, nof_tokens, input_strings,
+                      nof_input_strings);
+  case OPCODE_CALL:
+    return opcode_call(state, tokens, nof_tokens, input_strings,
+                       nof_input_strings);
   case OPCODE_PUSH:
     return opcode_push(state, tokens, nof_tokens);
   case OPCODE_LEAVE: {
@@ -762,5 +778,124 @@ int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
   state->current_text_offset += machine_code_len;
 
   free(machine_code);
+  return true;
+}
+
+int opcode_sub(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
+               char *input_strings[10], size_t nof_input_strings) {
+  if (nof_tokens < 3) {
+    fprintf(stderr, "mov failed: not enough operands\n");
+    return false;
+  }
+
+  size_t str_idx = 0;
+  int reg_token = -1, rm_token = -1;
+  bool reg_minus = false, rm_minus = false;
+  int reg_disp = 0, rm_disp = 0;
+  bool reg_is_mem = false, rm_is_mem = false;
+
+  size_t tok_idx = 1;
+  parse_mov_operand(tokens, &tok_idx, &reg_token, &reg_disp, &reg_minus,
+                    &reg_is_mem);
+  if (reg_disp == 8) {
+    if (str_idx >= nof_input_strings) {
+      fprintf(stderr,
+              "mov failed: not enough input strings, needed %ld got %ld\n",
+              str_idx, nof_input_strings);
+      return false;
+    }
+    char *disp_str = input_strings[str_idx++];
+    remove_dollar_sign(disp_str);
+    int actual_displacement = atoi(disp_str);
+    reg_disp = actual_displacement;
+  }
+  parse_mov_operand(tokens, &tok_idx, &rm_token, &rm_disp, &rm_minus,
+                    &rm_is_mem);
+  if (rm_disp == 8) {
+    if (str_idx >= nof_input_strings) {
+      fprintf(stderr,
+              "mov failed: not enough input strings, needed %ld got %ld\n",
+              str_idx, nof_input_strings);
+      return false;
+    }
+    char *disp_str = input_strings[str_idx++];
+    remove_dollar_sign(disp_str);
+    int actual_displacement = atoi(disp_str);
+    rm_disp = actual_displacement;
+  }
+
+  reg_disp = reg_minus ? -reg_disp : reg_disp;
+  rm_disp = rm_minus ? -rm_disp : rm_disp;
+  int displacement = rm_disp != 0 ? rm_disp : reg_disp;
+
+  if (reg_is_mem) {
+    uint8_t opcode_byte = 0x81;
+    uint8_t modrm_byte =
+        (0b11 << 6) | (0b101 << 3) | get_rm_reg_bits_from_reg(rm_token);
+    if (is_token_64bit(rm_token)) {
+      uint8_t rex_prefix = REX_PREFIX_BASE | REX_PREFIX_W;
+      buffer_append(&state->sections[state->text_idx].content, &rex_prefix, 1);
+      uint64_t value_byte = displacement;
+      if (displacement <= 128 && displacement >= 0) {
+        uint8_t value_byte = displacement;
+        opcode_byte = 0x83;
+        buffer_append(&state->sections[state->text_idx].content, &opcode_byte,
+                      1);
+        buffer_append(&state->sections[state->text_idx].content, &modrm_byte,
+                      1);
+        buffer_append(&state->sections[state->text_idx].content, &value_byte,
+                      1);
+        return true;
+      }
+      buffer_append(&state->sections[state->text_idx].content, &opcode_byte, 1);
+      buffer_append(&state->sections[state->text_idx].content, &modrm_byte, 1);
+      buffer_append(&state->sections[state->text_idx].content, &value_byte, 8);
+    } else if (is_token_32bit(rm_token)) {
+      uint32_t value_byte = displacement;
+      buffer_append(&state->sections[state->text_idx].content, &opcode_byte, 1);
+      buffer_append(&state->sections[state->text_idx].content, &modrm_byte, 1);
+      buffer_append(&state->sections[state->text_idx].content, &value_byte, 4);
+    } else if (is_token_16bit(rm_token)) {
+      uint16_t value_byte = displacement;
+      buffer_append(&state->sections[state->text_idx].content, &opcode_byte, 1);
+      buffer_append(&state->sections[state->text_idx].content, &modrm_byte, 1);
+      buffer_append(&state->sections[state->text_idx].content, &value_byte, 2);
+    } else {
+      uint8_t value_byte = displacement;
+      buffer_append(&state->sections[state->text_idx].content, &opcode_byte, 1);
+      buffer_append(&state->sections[state->text_idx].content, &modrm_byte, 1);
+      buffer_append(&state->sections[state->text_idx].content, &value_byte, 1);
+    }
+  }
+  // TODO: handle register to register subtractions
+  return true;
+}
+
+int opcode_call(asm_state_t *state, int tokens[MAX_LINE_SIZE],
+                size_t nof_tokens, char *input_strings[10],
+                size_t nof_input_strings) {
+  if (nof_tokens < 3) {
+    fprintf(stderr, "call failed: 2 operands required\n");
+    return false;
+  }
+  if (tokens[0] != OPCODE_CALL || tokens[1] != TOK_IDENT ||
+      tokens[2] != TOK_PLT_FLAG) {
+    fprintf(stderr, "call failed: got unexpected operand tokens\n");
+    return false;
+  }
+  uint8_t machine_code[5] = {0xe8, 0x00, 0x00, 0x00, 0x00};
+
+  if (nof_input_strings < 1) {
+    fprintf(stderr, "call failed: function name required\n");
+    return false;
+  }
+  char *called_function = input_strings[0];
+
+  elf_symbol_t *sym = NULL;
+  if ((sym = find_symbol(state, called_function)) == NULL)
+    add_symbol(state, called_function, SHN_ABS, 0, STT_NOTYPE, STB_GLOBAL);
+
+  buffer_append(&state->sections[state->text_idx].content, &machine_code, 5);
+
   return true;
 }

@@ -214,7 +214,7 @@ leave             { return OPCODE_LEAVE; }
 
 "@function"       { return TOK_FUNCTION_TYPE; }
 ","               { return TOK_COMMA; }
-"@PLT"            { return TOK_PLT_FLAG; }
+"@PLT" { return TOK_PLT_FLAG; }
 
 ".-"[a-zA-Z_]* ;
 "@progbits" ;

@@ -174,11 +174,12 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
     case TOK_RODATA_LABEL:
     case TOK_IDENT:
     case TOK_IDENT_TAG:
+    case TOK_PLT_FLAG:
       input_strings[nof_input_strings++] = strdup(yytext);
       break;
     case TOK_UNKNOWN:
-      fprintf(stderr, "%s line %d: Encountered unknown token %s\n",
-              state->input_files[file_idx], line_num, yytext);
+      fprintf(stderr, "%s line %d: encountered unknown token %s\n",
+              state->input_files[file_idx], line_num + 1, yytext);
       return false;
     }
     tokens[nof_tokens++] = current_token;
