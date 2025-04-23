@@ -4,13 +4,13 @@
 #include "state.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/types.h>
 
 // Opcode handlers
 int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
                 size_t nof_tokens);
-
-int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE],
-               size_t nof_tokens);
+int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
+               char *input_strings[10], size_t nof_input_strings);
 
 bool tok_is_label(int tok) {
   return tok == TOK_RODATA_LABEL || tok == TOK_FUNC_END ||
@@ -25,7 +25,8 @@ bool tok_is_machine_code(int tok) {
 }
 
 bool handle_line(asm_state_t *state, int tokens[MAX_LINE_SIZE],
-                 size_t nof_tokens, char *opt_str) {
+                 size_t nof_tokens, char *input_strings[10],
+                 size_t nof_input_strings) {
   printf("Processing line %d: ", line_num);
   for (size_t i = 0; i < nof_tokens; i++) {
     printf("%d ", tokens[i]);
@@ -36,14 +37,23 @@ bool handle_line(asm_state_t *state, int tokens[MAX_LINE_SIZE],
   if (nof_tokens < 1)
     return true;
 
-  if (tok_is_label(tokens[0]))
-    return handle_label(state, tokens[0], opt_str);
+  if (tok_is_label(tokens[0])) {
+    if (nof_input_strings < 1) {
+      return handle_label(state, tokens[0], NULL);
+    }
+    return handle_label(state, tokens[0], input_strings[0]);
+  }
 
-  if (tok_is_directive(tokens[0]))
-    return handle_directive(state, tokens, nof_tokens, opt_str);
+  if (tok_is_directive(tokens[0])) {
+    if (nof_input_strings < 1) {
+      return handle_directive(state, tokens, nof_tokens, NULL);
+    }
+    return handle_directive(state, tokens, nof_tokens, input_strings[0]);
+  }
 
   if (tok_is_machine_code(tokens[0]))
-    return handle_machine_code(state, tokens, nof_tokens);
+    return handle_machine_code(state, tokens, nof_tokens, input_strings,
+                               nof_input_strings);
 
   fprintf(stderr, "Encountered bad token: %d\n", tokens[0]);
   return false;
@@ -201,15 +211,27 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
 }
 
 bool handle_machine_code(asm_state_t *state, int tokens[MAX_LINE_SIZE],
-                         size_t nof_tokens) {
+                         size_t nof_tokens, char *input_strings[10],
+                         size_t nof_input_strings) {
   if (nof_tokens < 1)
     return false;
 
   switch (tokens[0]) {
   case OPCODE_MOV:
-    return opcode_mov(state, tokens, nof_tokens);
+    return opcode_mov(state, tokens, nof_tokens, input_strings,
+                      nof_input_strings);
   case OPCODE_PUSH:
     return opcode_push(state, tokens, nof_tokens);
+  case OPCODE_LEAVE: {
+    uint8_t leave_byte = 0xc9;
+    buffer_append(&state->sections[state->text_idx].content, &leave_byte, 1);
+    return true;
+  }
+  case OPCODE_RET: {
+    uint8_t ret_byte = 0xc3;
+    buffer_append(&state->sections[state->text_idx].content, &ret_byte, 1);
+    return true;
+  }
   default:
     break;
   }
@@ -571,7 +593,8 @@ int get_rm_reg_bits_from_reg(int tok) {
 }
 
 bool parse_mov_operand(int tokens[MAX_LINE_SIZE], size_t *tok_idx, int *reg,
-                       int *displacement, bool *minus) {
+                       int *displacement, bool *minus, bool *reg_is_mem) {
+  *reg_is_mem = false;
   if (tokens[(*tok_idx)] == TOK_MINUS) {
     (*tok_idx)++;
     *minus = true;
@@ -580,7 +603,8 @@ bool parse_mov_operand(int tokens[MAX_LINE_SIZE], size_t *tok_idx, int *reg,
     // TODO: get offset
     *displacement = 8;
     (*tok_idx)++;
-    if (tokens[(*tok_idx)++] == TOK_OPENPAREN) {
+    if (tokens[(*tok_idx)] == TOK_OPENPAREN) {
+      (*tok_idx)++;
       *reg = tokens[(*tok_idx)++];
       if (tokens[(*tok_idx)++] != TOK_CLOSEPAREN) {
         fprintf(stderr, "expected )\n");
@@ -588,59 +612,18 @@ bool parse_mov_operand(int tokens[MAX_LINE_SIZE], size_t *tok_idx, int *reg,
       }
       return true;
     }
+    *reg_is_mem = true;
   }
   *reg = tokens[(*tok_idx)++];
   return true;
 }
 
-int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE],
-               size_t nof_tokens) {
-  if (nof_tokens < 3) {
-    fprintf(stderr, "mov failed: not enough operands\n");
-    return false;
-  }
-
-  size_t machine_code_len = 0;
-  uint8_t *machine_code = malloc(3);
-  int reg_token = -1, rm_token = -1;
-  bool reg_minus = false, rm_minus = false;
-  int reg_disp = 0, rm_disp = 0;
-
-  size_t tok_idx = 1;
-  parse_mov_operand(tokens, &tok_idx, &reg_token, &reg_disp, &reg_minus);
-  printf("DEBUG: %ld\n", tok_idx);
-  parse_mov_operand(tokens, &tok_idx, &rm_token, &rm_disp, &rm_minus);
-
-  reg_disp = reg_minus ? -reg_disp : reg_disp;
-  rm_disp = rm_minus ? -rm_disp : rm_disp;
-
-  if (reg_disp > 0 && rm_disp > 0) {
-    fprintf(stderr, "mov failed: both operands have a displacement\n");
-    return false;
-  }
-
-  printf("DEBUG: reg: %d, rm: %d, reg_disp: %d, rm_disp: %d\n", reg_token,
-         rm_token, reg_disp, rm_disp);
-
-  int mod_bits;
-  int displacement = rm_disp > 0 ? rm_disp : reg_disp;
-  if (displacement == 0)
-    mod_bits = 0b00;
-  if (displacement >= -128 && displacement <= 127)
-    mod_bits = 0b01;
-  else
-    mod_bits = 0b11;
-  int reg_bits = get_rm_reg_bits_from_reg(reg_token);
-  int rm_bits = get_rm_reg_bits_from_reg(rm_token);
-  if (reg_bits < 0 || rm_bits < 0) {
-    fprintf(stderr, "mov failed: could not get reg or rm bits from register\n");
-    return false;
-  }
-  uint8_t modrm_byte = ((mod_bits & 0b00000011) << 6) |
-                       ((reg_bits & 0b00000011) << 3) | (rm_bits & 0b00000011);
-
-  // Add REX if required
-  if (is_token_64bit(reg_token) || is_token_64bit(rm_token)) {
+void add_rex_if_required(int reg_token, int rm_token, uint8_t *machine_code,
+                         size_t *machine_code_len) {
+  if ((is_token_64bit(reg_token) && is_token_64bit(rm_token)) ||
+      (is_extended_reg(reg_token) || is_extended_reg(rm_token)) ||
+      (is_rex_required_special(reg_token) ||
+       is_rex_required_special(rm_token))) {
     uint8_t rex = REX_PREFIX_BASE;
 
     bool is_64bit_op = true;
@@ -655,13 +638,114 @@ int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE],
       rex |= REX_PREFIX_B;
     if (is_rex_required_special(reg_token) || is_rex_required_special(rm_token))
       rex |= 0;
-    machine_code[machine_code_len++] = rex;
+    machine_code[(*machine_code_len)++] = rex;
+    printf("REX: 0x%02X ", rex);
   }
+}
+void remove_dollar_sign(char *str) {
+  int read_pos = 0, write_pos = 0;
+
+  while (str[read_pos] != '\0') {
+    if (str[read_pos] != '$') {
+      str[write_pos++] = str[read_pos];
+    }
+    read_pos++;
+  }
+
+  str[write_pos] = '\0';
+}
+
+int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
+               char *input_strings[10], size_t nof_input_strings) {
+  if (nof_tokens < 3) {
+    fprintf(stderr, "mov failed: not enough operands\n");
+    return false;
+  }
+
+  size_t str_idx = 0;
+  size_t machine_code_len = 0;
+  uint8_t *machine_code = malloc(3);
+  int reg_token = -1, rm_token = -1;
+  bool reg_minus = false, rm_minus = false;
+  int reg_disp = 0, rm_disp = 0;
+  bool reg_is_mem = false, rm_is_mem = false;
+
+  size_t tok_idx = 1;
+  parse_mov_operand(tokens, &tok_idx, &reg_token, &reg_disp, &reg_minus,
+                    &reg_is_mem);
+  if (reg_disp == 8) {
+    if (str_idx >= nof_input_strings) {
+      fprintf(stderr,
+              "mov failed: not enough input strings, needed %ld got %ld\n",
+              str_idx, nof_input_strings);
+      return false;
+    }
+    char *disp_str = input_strings[str_idx++];
+    remove_dollar_sign(disp_str);
+    int actual_displacement = atoi(disp_str);
+    reg_disp = actual_displacement;
+  }
+  parse_mov_operand(tokens, &tok_idx, &rm_token, &rm_disp, &rm_minus,
+                    &rm_is_mem);
+  if (rm_disp == 8) {
+    if (str_idx >= nof_input_strings) {
+      for (size_t i = 0; i < nof_input_strings; i++) {
+        printf("DEBUG %ld: string %s\n", i, input_strings[i]);
+      }
+      fprintf(stderr,
+              "mov failed: not enough input strings, needed %ld got %ld\n",
+              str_idx, nof_input_strings);
+      return false;
+    }
+    char *disp_str = input_strings[str_idx++];
+    remove_dollar_sign(disp_str);
+    int actual_displacement = atoi(disp_str);
+    rm_disp = actual_displacement;
+  }
+
+  reg_disp = reg_minus ? -reg_disp : reg_disp;
+  rm_disp = rm_minus ? -rm_disp : rm_disp;
+
+  if (reg_disp > 0 && rm_disp > 0) {
+    fprintf(stderr, "mov failed: both operands have a displacement\n");
+    return false;
+  }
+
+  int mod_bits;
+  int displacement = rm_disp != 0 ? rm_disp : reg_disp;
+
+  if (reg_is_mem || rm_is_mem) {
+    mod_bits = 0b00;
+    return true;
+  } else if (displacement == 0)
+    mod_bits = 0b11;
+  else if (displacement >= -128 && displacement <= 127)
+    mod_bits = 0b01;
+  else
+    mod_bits = 0b10;
+
+  int reg_bits = get_rm_reg_bits_from_reg(reg_token);
+  int rm_bits = get_rm_reg_bits_from_reg(rm_token);
+  if (reg_bits < 0 || rm_bits < 0) {
+    fprintf(stderr, "mov failed: could not get reg or rm bits from register\n");
+    return false;
+  }
+
+  add_rex_if_required(reg_token, rm_token, machine_code, &machine_code_len);
+
   // Add opcode
   machine_code[machine_code_len++] = 0x89;
 
   // Add Mod R/M byte
+  uint8_t modrm_byte =
+      ((mod_bits & 0b11) << 6) | ((reg_bits & 0b111) << 3) | (rm_bits & 0b111);
   machine_code[machine_code_len++] = modrm_byte;
+
+  // Add displacement if any
+  if (displacement != 0) {
+    machine_code[machine_code_len++] = displacement;
+  }
+  printf("\n");
 
   buffer_append(&state->sections[state->text_idx].content, machine_code,
                 machine_code_len);

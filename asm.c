@@ -150,28 +150,31 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
 
   int current_token;
   int tokens[MAX_LINE_SIZE];
-  char *opt_str = NULL;
+  char *input_strings[10];
+  size_t nof_input_strings = 0;
   size_t nof_tokens = 0;
 
   while ((current_token = yylex())) {
     switch (current_token) {
     case TOK_NEWLINE: {
-      if (!handle_line(state, tokens, nof_tokens, opt_str)) {
+      if (!handle_line(state, tokens, nof_tokens, input_strings,
+                       nof_input_strings)) {
         fprintf(stderr, "%s line %d: parsing failed\n",
                 state->input_files[file_idx], line_num);
         return false;
       }
       nof_tokens = 0;
-      opt_str = NULL;
+      nof_input_strings = 0;
       continue;
     }
     case TOK_COMMA:
       continue; // ignore commas
     case TOK_STRLIT:
+    case TOK_NUM:
     case TOK_RODATA_LABEL:
     case TOK_IDENT:
     case TOK_IDENT_TAG:
-      opt_str = strdup(yytext);
+      input_strings[nof_input_strings++] = strdup(yytext);
       break;
     case TOK_UNKNOWN:
       fprintf(stderr, "%s line %d: Encountered unknown token %s\n",
