@@ -152,6 +152,12 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
         state->sections[state->rodata_idx].size;
     buffer_append(&state->sections[state->rodata_idx].content, directive_str,
                   strlen(directive_str));
+    // update rela entry with offset
+    for (size_t i = 0; i < state->nof_relocations; i++) {
+      if (strcmp(state->relocations[i].symbol, ".rodata") == 0) {
+        state->relocations[i].offset += strlen(directive_str) + 1;
+      }
+    }
 
     return true;
   }
@@ -215,6 +221,7 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
     if ((sym = find_symbol(state, ".rodata")) == NULL)
       add_symbol(state, ".rodata", state->rodata_idx, 0, STT_SECTION,
                  STB_LOCAL);
+    add_rela(state, ".rodata", 0x6, RELOC_PC_RELATIVE, -4);
     return true;
   }
   case TOK_SECTION_GNUSTACK:
@@ -914,6 +921,9 @@ int opcode_call(asm_state_t *state, int tokens[MAX_LINE_SIZE],
     add_symbol(state, called_function, SHN_UNDEF, 0, STT_NOTYPE, STB_GLOBAL);
 
   buffer_append(&state->sections[state->text_idx].content, &machine_code, 5);
+
+  add_rela(state, called_function,
+           state->sections[state->text_idx].content.size - 4, RELOC_PLT, -4);
 
   return true;
 }
