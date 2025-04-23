@@ -5,6 +5,7 @@
 #include <elf.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/types.h>
 
 // Opcode handlers
@@ -15,9 +16,13 @@ int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
 
 int opcode_sub(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
                char *input_strings[10], size_t nof_input_strings);
+
 int opcode_call(asm_state_t *state, int tokens[MAX_LINE_SIZE],
                 size_t nof_tokens, char *input_strings[10],
                 size_t nof_input_strings);
+
+int opcode_lea(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
+               char *input_strings[10], size_t nof_input_strings);
 
 bool tok_is_label(int tok) {
   return tok == TOK_RODATA_LABEL || tok == TOK_FUNC_END ||
@@ -33,7 +38,8 @@ bool tok_is_machine_code(int tok) {
 
 bool handle_line(asm_state_t *state, int tokens[MAX_LINE_SIZE],
                  size_t nof_tokens, char *input_strings[10],
-                 size_t nof_input_strings) {
+                 size_t nof_input_strings) { // reset text offset
+  state->current_text_offset = state->sections[state->text_idx].content.size;
   printf("Processing line %d: ", line_num);
   for (size_t i = 0; i < nof_tokens; i++) {
     printf("%d ", tokens[i]);
@@ -233,6 +239,9 @@ bool handle_machine_code(asm_state_t *state, int tokens[MAX_LINE_SIZE],
   case OPCODE_SUBQ:
     return opcode_sub(state, tokens, nof_tokens, input_strings,
                       nof_input_strings);
+  case OPCODE_LEAL:
+    return opcode_lea(state, tokens, nof_tokens, input_strings,
+                      nof_input_strings);
   case OPCODE_CALL:
     return opcode_call(state, tokens, nof_tokens, input_strings,
                        nof_input_strings);
@@ -351,7 +360,6 @@ int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
 
   buffer_append(&state->sections[state->text_idx].content, machine_code,
                 machine_code_len);
-  state->current_text_offset += machine_code_len;
 
   free(machine_code);
 
@@ -897,5 +905,74 @@ int opcode_call(asm_state_t *state, int tokens[MAX_LINE_SIZE],
 
   buffer_append(&state->sections[state->text_idx].content, &machine_code, 5);
 
+  return true;
+}
+
+int opcode_lea(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
+               char *input_strings[10], size_t nof_input_strings) {
+
+  if (nof_tokens < 3) {
+    fprintf(stderr, "lea failed: not enough operands\n");
+    return false;
+  }
+  if (nof_input_strings < 1) {
+    fprintf(stderr, "lea failed: rodata label required\n");
+    return false;
+  }
+
+  int reg_token = -1, rm_token = -1;
+  char *rodata_label = input_strings[0];
+
+  size_t tok_idx = 1;
+
+  if (tokens[tok_idx++] != TOK_RODATA_LABEL_REF) {
+    fprintf(stderr, "lea failed: expected rodata reference in operand 1\n");
+    return false;
+  }
+  if (tokens[tok_idx++] != TOK_OPENPAREN) {
+    fprintf(stderr, "expected (\n");
+    return false;
+  }
+  reg_token = tokens[tok_idx++];
+  if (tokens[tok_idx++] != TOK_CLOSEPAREN) {
+    fprintf(stderr, "expected )\n");
+    return false;
+  }
+  rm_token = tokens[tok_idx++];
+
+  uint8_t *machine_code = malloc(3);
+  size_t machine_code_len = 0;
+
+  add_rex_if_required(reg_token, rm_token, machine_code, &machine_code_len);
+  uint8_t opcode_byte = 0x8d;
+  machine_code[machine_code_len++] = opcode_byte;
+
+  uint8_t modrm_byte =
+      (0b00 << 6) | (get_rm_reg_bits_from_reg(rm_token) << 3) | 0b101;
+
+  machine_code[machine_code_len++] = modrm_byte;
+
+  size_t rodata_label_len = strlen(rodata_label);
+  rodata_label[rodata_label_len] = ':';
+  rodata_label[rodata_label_len + 1] = '\0';
+
+  uint64_t *value = NULL;
+
+  for (size_t i = 0; i < state->nof_rodata_entries; i++) {
+    printf("DEBUG: %s\n", state->rodata_entries[i].name);
+    if (strcmp(state->rodata_entries[i].name, rodata_label) == 0) {
+      value = &state->rodata_entries[i].offset;
+      break;
+    }
+  }
+  if (value == NULL) {
+    fprintf(stderr, "lea failed: no such rodata value %s\n", rodata_label);
+    return false;
+  }
+
+  buffer_append(&state->sections[state->text_idx].content, machine_code,
+                machine_code_len);
+
+  buffer_append(&state->sections[state->text_idx].content, value, 4);
   return true;
 }

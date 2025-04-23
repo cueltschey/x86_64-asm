@@ -175,6 +175,7 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
     case TOK_IDENT:
     case TOK_IDENT_TAG:
     case TOK_PLT_FLAG:
+    case TOK_RODATA_LABEL_REF:
       input_strings[nof_input_strings++] = strdup(yytext);
       break;
     case TOK_UNKNOWN:
