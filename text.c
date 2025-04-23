@@ -613,6 +613,7 @@ bool parse_mov_operand(int tokens[MAX_LINE_SIZE], size_t *tok_idx, int *reg,
       return true;
     }
     *reg_is_mem = true;
+    return true;
   }
   *reg = tokens[(*tok_idx)++];
   return true;
@@ -639,7 +640,6 @@ void add_rex_if_required(int reg_token, int rm_token, uint8_t *machine_code,
     if (is_rex_required_special(reg_token) || is_rex_required_special(rm_token))
       rex |= 0;
     machine_code[(*machine_code_len)++] = rex;
-    printf("REX: 0x%02X ", rex);
   }
 }
 void remove_dollar_sign(char *str) {
@@ -689,9 +689,6 @@ int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
                     &rm_is_mem);
   if (rm_disp == 8) {
     if (str_idx >= nof_input_strings) {
-      for (size_t i = 0; i < nof_input_strings; i++) {
-        printf("DEBUG %ld: string %s\n", i, input_strings[i]);
-      }
       fprintf(stderr,
               "mov failed: not enough input strings, needed %ld got %ld\n",
               str_idx, nof_input_strings);
@@ -714,10 +711,23 @@ int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
   int mod_bits;
   int displacement = rm_disp != 0 ? rm_disp : reg_disp;
 
-  if (reg_is_mem || rm_is_mem) {
-    mod_bits = 0b00;
+  if (reg_is_mem) {
+    // Handle immediate move
+    printf("IMMEDIATE MOVE REG: %d\n", rm_token);
+    uint8_t register_byte = 0xb8 + get_rm_reg_bits_from_reg(rm_token);
+    buffer_append(&state->sections[state->text_idx].content, &register_byte, 1);
+    if (is_token_64bit(rm_token)) {
+      // TODO: add REX
+      uint64_t value = displacement;
+      buffer_append(&state->sections[state->text_idx].content, &value, 8);
+      return true;
+    }
+    uint32_t value = displacement;
+    buffer_append(&state->sections[state->text_idx].content, &value, 4);
     return true;
-  } else if (displacement == 0)
+  }
+
+  if (displacement == 0)
     mod_bits = 0b11;
   else if (displacement >= -128 && displacement <= 127)
     mod_bits = 0b01;

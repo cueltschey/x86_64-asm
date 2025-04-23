@@ -4,10 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// 1. Add parsing using flex
-// 2. Research machine code
-// 3. parse instructions for translation
-// 4. implement funcions and fix bugs
+// sub
+// lea
+// call
 
 int main(int argc, char **argv) {
   asm_state_t state = {};
