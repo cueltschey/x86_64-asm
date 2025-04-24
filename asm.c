@@ -45,17 +45,6 @@ void assembler_init(asm_state_t *state) {
   state->nof_rodata_entries = 0;
 }
 
-void assembler_add_input_file(asm_state_t *state, const char *filename) {
-  if (state->nof_input_files >= MAX_FILES) {
-    fprintf(stderr, "Too many input files. Ignoring %s\n", filename);
-    return;
-  }
-  state->input_files[state->nof_input_files++] = filename;
-}
-void assembler_set_output_file(asm_state_t *state, const char *filename) {
-  state->output_file = filename;
-}
-
 char *get_asm_state_info(const asm_state_t *state) {
   size_t bufsize = 8192;
   char *buffer = malloc(bufsize);
@@ -65,16 +54,9 @@ char *get_asm_state_info(const asm_state_t *state) {
   size_t offset = 0;
   offset += snprintf(buffer + offset, bufsize - offset,
                      "ASM State:\n"
-                     "  Output file: %s\n"
-                     "  Number of input files: %zu\n",
-                     state->output_file ? state->output_file : "(null)",
-                     state->nof_input_files);
-
-  for (size_t i = 0; i < state->nof_input_files && i < MAX_FILES; ++i) {
-    offset +=
-        snprintf(buffer + offset, bufsize - offset, "    Input file[%zu]: %s\n",
-                 i, state->input_files[i] ? state->input_files[i] : "(null)");
-  }
+                     "  input_file: %s\n"
+                     "  output_file: %s\n",
+                     state->input_file, state->output_file);
 
   offset +=
       snprintf(buffer + offset, bufsize - offset,
@@ -115,37 +97,16 @@ char *get_asm_state_info(const asm_state_t *state) {
   return buffer;
 }
 
-bool assembler_run(asm_state_t *state) {
-  if (state->nof_input_files == 0) {
-    fprintf(stderr, "Error: No input files specified.\n");
-    return false;
-  }
-
-  for (size_t i = 0; i < state->nof_input_files; i++) {
-    if (!assemble_file(state, i)) {
-      fprintf(stderr, "Translation failed in file %s line %d.\n",
-              state->input_files[state->current_file], line_num);
-      return false;
-    }
-  }
-  printf("Writing ELF file...\n");
-  // add_symbol(&state, ".file", SHN_ABS, 0, STT_FILE, STB_LOCAL);
-  if (!write_elf_object_file(state)) {
-    fprintf(stderr, "Failed to write to ELF file %s\n", state->output_file);
-    return false;
-  }
-
-  printf("Assembly successful.\n");
-  return true;
-}
-
-bool assemble_file(asm_state_t *state, size_t file_idx) {
-  printf("Assembling file: %s\n", state->input_files[file_idx]);
-  yyin = fopen(state->input_files[file_idx], "r");
+bool assemble_file(const char *input_file, const char *output_file) {
+  asm_state_t state;
+  assembler_init(&state);
+  state.input_file = strdup(input_file);
+  state.output_file = strdup(output_file);
+  printf("Assembling file: %s\n", state.input_file);
+  yyin = fopen(state.input_file, "r");
   if (!yyin) {
     perror("fopen failed");
-    fprintf(stderr, "Error opening input file: %s\n",
-            state->input_files[file_idx]);
+    fprintf(stderr, "Error opening input file: %s\n", state.input_file);
     return false;
   }
 
@@ -161,10 +122,10 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
   while ((current_token = yylex())) {
     switch (current_token) {
     case TOK_NEWLINE: {
-      if (!handle_line(state, tokens, nof_tokens, input_strings,
+      if (!handle_line(&state, tokens, nof_tokens, input_strings,
                        nof_input_strings)) {
-        fprintf(stderr, "%s line %d: parsing failed\n",
-                state->input_files[file_idx], line_num);
+        fprintf(stderr, "%s line %d: parsing failed\n", state.input_file,
+                line_num + 1);
         return false;
       }
       nof_tokens = 0;
@@ -184,11 +145,20 @@ bool assemble_file(asm_state_t *state, size_t file_idx) {
       break;
     case TOK_UNKNOWN:
       fprintf(stderr, "%s line %d: encountered unknown token %s\n",
-              state->input_files[file_idx], line_num + 1, yytext);
+              state.input_file, line_num + 1, yytext);
       return false;
     }
     tokens[nof_tokens++] = current_token;
   }
+
+  if (!write_elf_object_file(&state)) {
+    fprintf(stderr, "Failed to write to ELF file %s\n", state.output_file);
+    ret = false;
+  }
+
+  char *info_str = get_asm_state_info(&state);
+  if (info_str)
+    printf("%s\n", info_str);
 
   return ret;
 }

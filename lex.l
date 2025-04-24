@@ -209,8 +209,10 @@ leave             { return OPCODE_LEAVE; }
 ".LC"[0-9]+:        { return TOK_RODATA_LABEL; }
 ".LFB"[0-9]+:       { return TOK_FUNC_START; }
 ".LFE"[0-9]+:       { return TOK_FUNC_END; }
+".L"[0-9]+:         { return TOK_TEXT_LABEL; }
 
 ".LC"[0-9]+       { return TOK_RODATA_LABEL_REF; }
+".L"[0-9]+        { return TOK_TEXT_LABEL_REF; }
 
 "@function"       { return TOK_FUNCTION_TYPE; }
 ","               { return TOK_COMMA; }

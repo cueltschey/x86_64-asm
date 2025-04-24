@@ -1,34 +1,25 @@
 #include "args.h"
 #include "asm.h"
-#include "elf.h"
-#include "state.h"
 #include <elf.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 // Improve data struct
 // Two passes
 // Separate instructions into units
 // handle functions better
-// store all info on rodata labels better
-// How are lea addresses and relocations determined
 // store info on text labels
 // jmp
 // cmp
 
 int main(int argc, char **argv) {
-  asm_state_t state = {};
-  assembler_init(&state);
-  if (!parse_args(argc, argv, &state)) {
+  all_args_t args = {};
+  if (!parse_args(argc, argv, &args)) {
     usage(argv);
     return EXIT_FAILURE;
   }
-  if (!assembler_run(&state))
+  printf("Assembling %s into %s\n", args.input_file, args.output_file);
+  if (!assemble_file(args.input_file, args.output_file))
     return EXIT_FAILURE;
-
-  char *info_str = get_asm_state_info(&state);
-  if (info_str)
-    printf("%s\n", info_str);
 
   return 0;
 }

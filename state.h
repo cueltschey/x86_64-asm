@@ -78,8 +78,7 @@ typedef enum asm_mode_e {
 
 typedef struct asm_state_s {
   // File paths
-  const char *input_files[MAX_FILES];
-  size_t nof_input_files;
+  const char *input_file;
   const char *output_file;
 
   // What mode to parse
@@ -90,7 +89,7 @@ typedef struct asm_state_s {
   size_t current_file;
   size_t current_line;
 
-  // Indexes to string tables
+  // Indexes to sections
   size_t text_idx;
   size_t note_idx;
   size_t symtab_idx;
