@@ -10,9 +10,12 @@
 void assembler_init(asm_state_t *state) {
   memset(state, 0, sizeof(asm_state_t));
   state->output_file = "a.out";
-  state->current_file = 0;
   line_num = 0;
-  state->parse_mode = TEXT;
+
+  state->text_state.parse_mode = TEXT;
+  state->text_state.nof_instructions = 0;
+  state->text_state.nof_rodata_entries = 0;
+  state->text_state.instructions = (inst_t *)malloc(INIT_INSTRUCTION_COUNT);
 
   state->text_idx = -1;
   state->note_idx = -1;
@@ -42,7 +45,7 @@ void assembler_init(asm_state_t *state) {
   buffer_append(&state->sections[state->strtab_idx].content, "\0", 1);
   buffer_append(&state->sections[state->shstrtab_idx].content, "\0", 1);
 
-  state->nof_rodata_entries = 0;
+  state->text_state.rodata_buffer = &state->sections[state->rodata_idx].content;
 }
 
 char *get_asm_state_info(const asm_state_t *state) {
@@ -61,16 +64,12 @@ char *get_asm_state_info(const asm_state_t *state) {
   offset +=
       snprintf(buffer + offset, bufsize - offset,
                "  Current text offset: %lu\n"
-               "  Current file index: %zu\n"
-               "  Current line: %d\n"
                "  Indexes:\n"
-               "    text_idx: %zu\n"
                "    note_idx: %zu\n"
                "    symtab_idx: %zu\n"
                "    strtab_idx: %zu\n"
                "    shstrtab_idx: %zu\n"
                "  Symbols (%zu total):\n",
-               state->current_text_offset, state->current_file, line_num,
                state->text_idx, state->note_idx, state->symtab_idx,
                state->strtab_idx, state->shstrtab_idx, state->nof_symbols);
 
@@ -114,22 +113,20 @@ bool assemble_file(const char *input_file, const char *output_file) {
   bool ret = true;
 
   int current_token;
-  int tokens[MAX_LINE_SIZE];
-  char *input_strings[10];
-  size_t nof_input_strings = 0;
-  size_t nof_tokens = 0;
+  line_info_t current_info;
+  current_info.nof_input_strings = 0;
+  current_info.nof_tokens = 0;
 
   while ((current_token = yylex())) {
     switch (current_token) {
     case TOK_NEWLINE: {
-      if (!handle_line(&state, tokens, nof_tokens, input_strings,
-                       nof_input_strings)) {
+      if (!handle_line(&state.text_state, &current_info)) {
         fprintf(stderr, "%s line %d: parsing failed\n", state.input_file,
                 line_num + 1);
         return false;
       }
-      nof_tokens = 0;
-      nof_input_strings = 0;
+      current_info.nof_tokens = 0;
+      current_info.nof_input_strings = 0;
       continue;
     }
     case TOK_COMMA:
@@ -141,14 +138,15 @@ bool assemble_file(const char *input_file, const char *output_file) {
     case TOK_IDENT_TAG:
     case TOK_PLT_FLAG:
     case TOK_RODATA_LABEL_REF:
-      input_strings[nof_input_strings++] = strdup(yytext);
+      current_info.input_strings[current_info.nof_input_strings++] =
+          strdup(yytext);
       break;
     case TOK_UNKNOWN:
       fprintf(stderr, "%s line %d: encountered unknown token %s\n",
               state.input_file, line_num + 1, yytext);
       return false;
     }
-    tokens[nof_tokens++] = current_token;
+    current_info.tokens[current_info.nof_tokens++] = current_token;
   }
 
   if (!write_elf_object_file(&state)) {

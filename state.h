@@ -10,6 +10,10 @@
 #define MAX_LINE_SIZE 20
 #define MAX_RELA 20
 
+#define MAX_FUNCTIONS 26
+
+#define INIT_INSTRUCTION_COUNT 1024
+
 #include <elf.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -70,24 +74,64 @@ typedef struct elf_reloc_s {
   int64_t addend;
 } elf_reloc_t;
 
-typedef enum asm_mode_e {
+typedef struct line_info_s {
+  int tokens[MAX_LINE_SIZE];
+  size_t nof_tokens;
+  char *input_strings[10];
+  size_t nof_input_strings;
+} line_info_t;
+
+typedef enum text_parse_mode_s {
   TEXT = 0,
   RODATA,
   GNU_STACK,
-} asm_mode_t;
+} text_parse_mode_t;
+
+typedef enum inst_status_e {
+  COMPLETE = 0,
+  LEA_REQUIRES_OFFSET,
+  JMP_REQUIRES_OFFSET
+} inst_status_t;
+
+typedef struct inst_s {
+  uint8_t *machine_code;
+  size_t machine_code_len;
+
+  inst_status_t status;
+} inst_t;
+
+typedef struct func_s {
+  const char *name;
+  uint64_t size;
+  uint64_t location;
+  bool is_global = false;
+} func_t;
+
+typedef struct text_state_s {
+  text_parse_mode_t parse_mode;
+  uint64_t current_text_offset = 0;
+
+  uint64_t rodata_entries[MAX_RODATA_ENTRIES];
+  size_t nof_rodata_entries = 0;
+
+  uint64_t text_labels[MAX_RODATA_ENTRIES];
+  size_t nof_text_labels = 0;
+
+  func_t functions[MAX_FUNCTIONS];
+  size_t nof_functions = 0;
+
+  inst_t *instructions;
+  size_t nof_instructions = 0;
+
+  const char *file_name;
+
+  asm_buf_t *rodata_buffer;
+} text_state_t;
 
 typedef struct asm_state_s {
   // File paths
   const char *input_file;
   const char *output_file;
-
-  // What mode to parse
-  asm_mode_t parse_mode;
-
-  // File position data
-  uint64_t current_text_offset;
-  size_t current_file;
-  size_t current_line;
 
   // Indexes to sections
   size_t text_idx;
@@ -98,9 +142,7 @@ typedef struct asm_state_s {
   size_t rodata_idx;
   size_t rela_text_idx;
 
-  // Label data
-  uint64_t rodata_entries[MAX_RODATA_ENTRIES];
-  size_t nof_rodata_entries;
+  text_state_t text_state;
 
   // ELF data
   elf_symbol_t symbols[MAX_SYMBOLS];

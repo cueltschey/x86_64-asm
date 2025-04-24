@@ -2,24 +2,12 @@
 #include "elf.h"
 #include "lex.h"
 #include "state.h"
+#include <cinttypes>
+#include <cstdio>
 #include <elf.h>
+#include <stdint.h>
 #include <stdlib.h>
-
-// Opcode handlers
-int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
-                size_t nof_tokens);
-int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
-               char *input_strings[10], size_t nof_input_strings);
-
-int opcode_sub(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
-               char *input_strings[10], size_t nof_input_strings);
-
-int opcode_call(asm_state_t *state, int tokens[MAX_LINE_SIZE],
-                size_t nof_tokens, char *input_strings[10],
-                size_t nof_input_strings);
-
-int opcode_lea(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
-               char *input_strings[10], size_t nof_input_strings);
+#include <string.h>
 
 bool tok_is_label(int tok) {
   return tok == TOK_RODATA_LABEL || tok == TOK_FUNC_END ||
@@ -33,72 +21,72 @@ bool tok_is_machine_code(int tok) {
   return tok >= OPCODE_ADDQ && tok <= OPCODE_MULQ;
 }
 
-bool handle_line(asm_state_t *state, int tokens[MAX_LINE_SIZE],
-                 size_t nof_tokens, char *input_strings[10],
-                 size_t nof_input_strings) { // reset text offset
-  state->current_text_offset = state->sections[state->text_idx].content.size;
-  printf("Processing line %d: ", line_num);
-  for (size_t i = 0; i < nof_tokens; i++) {
-    printf("%d ", tokens[i]);
-  }
-  printf("\n");
-
-  // ignore blank lines
-  if (nof_tokens < 1)
+bool handle_line(text_state_t *state, line_info_t *info) { // reset text offset
+  // Skip blank lines
+  if (info->nof_tokens < 1)
     return true;
 
-  if (tok_is_label(tokens[0])) {
-    if (nof_input_strings < 1) {
-      return handle_label(state, tokens[0], NULL);
-    }
-    return handle_label(state, tokens[0], input_strings[0]);
-  }
-
-  if (tok_is_directive(tokens[0])) {
-    if (nof_input_strings < 1) {
-      return handle_directive(state, tokens, nof_tokens, NULL);
-    }
-    return handle_directive(state, tokens, nof_tokens, input_strings[0]);
-  }
-
-  if (tok_is_machine_code(tokens[0]))
-    return handle_machine_code(state, tokens, nof_tokens, input_strings,
-                               nof_input_strings);
-
-  fprintf(stderr, "Encountered bad token: %d\n", tokens[0]);
+  if (tok_is_label(info->tokens[0]))
+    return handle_label(state, info);
+  else if (tok_is_label(info->tokens[0]))
+    return handle_directive(state, info);
+  else if (tok_is_machine_code(info->tokens[0]))
+    return handle_machine_code(state, info);
+  else
+    fprintf(stderr, "First token did not match expected: %d\n",
+            info->tokens[0]);
   return false;
 }
 
-bool handle_label(asm_state_t *state, int label_tok, char *label_name) {
+bool handle_label(text_state_t *state, line_info_t *info) {
+  int label_tok = info->tokens[0];
+  char *label_name = NULL;
+  if (info->nof_input_strings > 0) {
+    label_name = info->input_strings[0];
+  }
   switch (state->parse_mode) {
   case TEXT: {
-    // Ignore function labels
-    if (label_tok == TOK_FUNC_START)
-      return true;
-    if (label_tok == TOK_FUNC_END) {
-      elf_symbol_t *function_sym = NULL;
-      for (size_t i = 0; i < state->nof_symbols; i++) {
-        printf("DEBUG: %ld %s\n", i, state->symbols[i].name);
-        if ((state->symbols[i].info & 0xf) == STT_FUNC) {
-          function_sym = &state->symbols[i];
-        }
-      }
-      if (function_sym == NULL)
-        return true;
-      function_sym->size =
-          state->sections[state->text_idx].content.size - function_sym->value;
-      return true;
-    }
-    // remove colon
-    if (label_tok == TOK_IDENT_TAG)
-      label_name[strlen(label_name) - 1] = '\0';
-    elf_symbol_t *sym = find_symbol(state, label_name);
-    if (sym == NULL) {
-      fprintf(stderr, ".text: No such symbol %s\n", label_name);
+    if (label_name == NULL) {
+      fprintf(stderr, "Expected label name in .text\n");
       return false;
     }
-    sym->value = state->current_text_offset;
-    break;
+    // Function definition
+    if (label_tok == TOK_IDENT_TAG) {
+      label_name[strlen(label_name) - 1] = '\0'; // remove :
+      func_t new_func = {};
+      new_func.name = strdup(label_name);
+      state->functions[state->nof_functions++] = new_func;
+      return true;
+    }
+    // define text label
+    if (label_tok == TOK_TEXT_LABEL) {
+    }
+    // .LFB[0-9]
+    if (label_tok == TOK_FUNC_START) {
+      label_name[strlen(label_name) - 1] = '\0'; // remove :
+      label_name += 4;                           // skip .LFB
+      size_t func_idx = atoi(label_name);
+      if (func_idx >= state->nof_functions) {
+        fprintf(stderr, "Function index out of bounds %ld\n", func_idx);
+        return false;
+      }
+      state->functions[func_idx].location = state->current_text_offset;
+    }
+    // .LFE[0-9]
+    if (label_tok == TOK_FUNC_END) {
+      label_name[strlen(label_name) - 1] = '\0'; // remove :
+      label_name += 4;                           // skip .LFB
+      size_t func_idx = atoi(label_name);
+      if (func_idx >= state->nof_functions) {
+        fprintf(stderr, "Function index out of bounds %ld\n", func_idx);
+        return false;
+      }
+      state->functions[func_idx].size =
+          state->current_text_offset - state->functions[func_idx].location;
+    }
+
+    fprintf(stderr, "Got unexpected label in .text: %d", label_tok);
+    return false;
   }
   case RODATA: {
     if (label_tok != TOK_RODATA_LABEL) {
@@ -106,6 +94,7 @@ bool handle_label(asm_state_t *state, int label_tok, char *label_name) {
               label_name);
       return false;
     }
+    // .LC[0-9]
     state->nof_rodata_entries++;
     break;
   }
@@ -115,25 +104,29 @@ bool handle_label(asm_state_t *state, int label_tok, char *label_name) {
   return true;
 }
 
-bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
-                      size_t nof_tokens, char *directive_str) {
-  if (nof_tokens < 1)
+bool handle_directive(text_state_t *state, line_info_t *info) {
+  if (info->nof_tokens < 1)
     return false;
 
-  switch (tokens[0]) {
+  char *directive_str = NULL;
+  if (info->nof_input_strings > 0) {
+    directive_str = info->input_strings[0];
+  }
+
+  switch (info->tokens[0]) {
   case TOK_FILEHEADER: {
-    if (directive_str[0] == '"')
-      directive_str++;
-    if (directive_str[strlen(directive_str) - 1] == '"')
-      directive_str[strlen(directive_str) - 1] = '\0';
-    add_symbol(state, directive_str, SHN_ABS, 0, STT_FILE, STB_LOCAL);
+    if (directive_str == NULL) {
+      fprintf(stderr, ".file directive requires string\n");
+      return false;
+    }
+    // Remove quotes
+    directive_str++;
+    directive_str[strlen(directive_str) - 1] = '\0';
+    state->file_name = strdup(directive_str);
     return true;
   }
   case TOK_SECTION_TEXT: {
     state->parse_mode = TEXT;
-    elf_symbol_t *sym = NULL;
-    if ((sym = find_symbol(state, ".text")) == NULL)
-      add_symbol(state, ".text", state->text_idx, 0, STT_SECTION, STB_LOCAL);
     return true;
   }
   case TOK_STRINGDEF: {
@@ -142,22 +135,13 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
       return false;
     }
 
-    if (directive_str[0] == '"')
-      directive_str++;
-    if (directive_str[strlen(directive_str) - 1] == '"')
-      directive_str[strlen(directive_str) - 1] = '\0';
+    // Remove quotes
+    directive_str++;
+    directive_str[strlen(directive_str) - 1] = '\0';
 
     state->rodata_entries[state->nof_rodata_entries - 1] =
-        state->sections[state->rodata_idx].size;
-    buffer_append(&state->sections[state->rodata_idx].content, directive_str,
-                  strlen(directive_str));
-    // update rela entry with offset
-    for (size_t i = 0; i < state->nof_relocations; i++) {
-      if (strcmp(state->relocations[i].symbol, ".rodata") == 0) {
-        state->relocations[i].offset += strlen(directive_str) + 1;
-      }
-    }
-
+        strlen(directive_str);
+    buffer_append(state->rodata_buffer, directive_str, strlen(directive_str));
     return true;
   }
   case TOK_GLOBLDEF: {
@@ -165,43 +149,25 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
       fprintf(stderr, "Encountered .globl outside of .text\n");
       return false;
     }
-    // Define the symbol as global
-    add_symbol(state, directive_str, state->text_idx, 0, STT_NOTYPE,
-               STB_GLOBAL);
+    if (directive_str == NULL) {
+      fprintf(stderr, ".globl requires string\n");
+      return false;
+    }
+    // Locate function and set to global
+    for (size_t i = state->nof_functions; i >= 0; i--) {
+      if (strcmp(state->functions[i].name, directive_str) == 0) {
+        state->functions[i].is_global = true;
+      }
+    }
     return true;
   }
   case TOK_SIZEDEF: {
-    if (state->parse_mode != TEXT) {
-      fprintf(stderr, "Encountered .size outside of .text\n");
-      return false;
-    }
-
-    elf_symbol_t *sym = find_symbol(state, directive_str);
-    if (sym == NULL) {
-      fprintf(stderr, ".size: No such symbol %s\n", directive_str);
-      return false;
-    }
-
-    sym->size = state->current_text_offset - sym->value;
+    // Ignore, since we handle size elsewhere
     return true;
   }
 
   case TOK_TYPEDEF: {
-    if (state->parse_mode != TEXT) {
-      fprintf(stderr, "Encountered .type outside of .text\n");
-      return false;
-    }
-
-    elf_symbol_t *sym = find_symbol(state, directive_str);
-    if (sym == NULL) {
-      fprintf(stderr, ".type: No such symbol %s\n", directive_str);
-      return false;
-    }
-
-    uint8_t sym_type = STT_FUNC;
-    // TODO: other types
-
-    sym->info = ELF64_ST_INFO(sym->global ? STB_GLOBAL : STB_LOCAL, sym_type);
+    // TODO: handle types
     return true;
   }
 
@@ -213,13 +179,9 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
     return false;
   }
 
-  switch (tokens[1]) {
+  switch (info->tokens[1]) {
   case TOK_SECTION_RODATA: {
     state->parse_mode = RODATA;
-    elf_symbol_t *sym = NULL;
-    if ((sym = find_symbol(state, ".rodata")) == NULL)
-      add_symbol(state, ".rodata", state->rodata_idx, 0, STT_SECTION,
-                 STB_LOCAL);
     return true;
   }
   case TOK_SECTION_GNUSTACK:
@@ -227,9 +189,6 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
     return true;
   case TOK_SECTION_TEXT: {
     state->parse_mode = TEXT;
-    elf_symbol_t *sym = NULL;
-    if ((sym = find_symbol(state, ".text")) == NULL)
-      add_symbol(state, ".text", state->text_idx, 0, STT_SECTION, STB_LOCAL);
     return true;
   }
   default:
@@ -238,58 +197,58 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
   }
 }
 
-bool handle_machine_code(asm_state_t *state, int tokens[MAX_LINE_SIZE],
-                         size_t nof_tokens, char *input_strings[10],
-                         size_t nof_input_strings) {
-  if (nof_tokens < 1)
+bool handle_machine_code(text_state_t *state, line_info_t *info) {
+  if (info->nof_tokens < 1)
     return false;
 
-  switch (tokens[0]) {
+  switch (info->tokens[0]) {
   case OPCODE_MOV:
-    return opcode_mov(state, tokens, nof_tokens, input_strings,
-                      nof_input_strings);
+    return opcode_mov(state, info);
   case OPCODE_SUBB:
   case OPCODE_SUBL:
   case OPCODE_SUBW:
   case OPCODE_SUBQ:
-    return opcode_sub(state, tokens, nof_tokens, input_strings,
-                      nof_input_strings);
+    return opcode_sub(state, info);
   case OPCODE_LEAL:
-    return opcode_lea(state, tokens, nof_tokens, input_strings,
-                      nof_input_strings);
+    return opcode_lea(state, info);
   case OPCODE_CALL:
-    return opcode_call(state, tokens, nof_tokens, input_strings,
-                       nof_input_strings);
+    return opcode_call(state, info);
   case OPCODE_PUSH:
-    return opcode_push(state, tokens, nof_tokens);
-  case OPCODE_LEAVE: {
-    uint8_t leave_byte = 0xc9;
-    buffer_append(&state->sections[state->text_idx].content, &leave_byte, 1);
-    return true;
-  }
-  case OPCODE_RET: {
-    uint8_t ret_byte = 0xc3;
-    buffer_append(&state->sections[state->text_idx].content, &ret_byte, 1);
-    return true;
-  }
+    return opcode_push(state, info);
+  case OPCODE_LEAVE:
+    return opcode_leave(state);
+  case OPCODE_RET:
+    return opcode_ret(state);
   default:
     break;
   }
-
   return true;
 }
 
-int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
-                size_t nof_tokens) {
-  if (nof_tokens != 2) {
+bool opcode_leave(text_state_t *state) {
+  uint8_t *machine_code = malloc(1);
+  machine_code[0] = 0xc9;
+  add_new_inst(state, machine_code, 1, COMPLETE);
+  return true;
+}
+
+int opcode_ret(text_state_t *state) {
+  uint8_t *machine_code = malloc(1);
+  machine_code[0] = 0xc3;
+  add_new_inst(state, machine_code, 1, COMPLETE);
+  return true;
+}
+
+int opcode_push(text_state_t *state, line_info_t *info) {
+  if (info->nof_tokens != 2) {
     fprintf(stderr, "push encoding failed: expected 2 operands but got %ld\n",
-            nof_tokens);
+            info->nof_tokens);
     return false;
   }
   size_t machine_code_len = 0;
   uint8_t *machine_code = malloc(2);
 
-  switch (tokens[1]) {
+  switch (info->tokens[1]) {
   // Legacy 64-bit registers: opcode = 0x50 + reg
   case TOK_REG_RAX:
     machine_code[0] = 0x50;
@@ -368,16 +327,12 @@ int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
 
   default:
     fprintf(stderr, "push encoding failed: unsupported operand token: %d\n",
-            tokens[1]);
+            info->tokens[1]);
     free(machine_code);
     return false;
   }
 
-  buffer_append(&state->sections[state->text_idx].content, machine_code,
-                machine_code_len);
-
-  free(machine_code);
-
+  add_new_inst(state, machine_code, machine_code_len, COMPLETE);
   return true;
 }
 bool is_extended_reg(int reg_token) {
@@ -682,58 +637,49 @@ void add_rex_if_required(int reg_token, int rm_token, uint8_t *machine_code,
   }
 }
 void remove_dollar_sign(char *str) {
-  int read_pos = 0, write_pos = 0;
-
-  while (str[read_pos] != '\0') {
-    if (str[read_pos] != '$') {
-      str[write_pos++] = str[read_pos];
-    }
-    read_pos++;
-  }
-
-  str[write_pos] = '\0';
+  if (str[0] == '$')
+    str++;
 }
 
-int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
-               char *input_strings[10], size_t nof_input_strings) {
-  if (nof_tokens < 3) {
+int opcode_mov(text_state_t *state, line_info_t *info) {
+  if (info->nof_tokens < 3) {
     fprintf(stderr, "mov failed: not enough operands\n");
     return false;
   }
 
   size_t str_idx = 0;
   size_t machine_code_len = 0;
-  uint8_t *machine_code = malloc(3);
+  uint8_t *machine_code = malloc(10);
   int reg_token = -1, rm_token = -1;
   bool reg_minus = false, rm_minus = false;
   int reg_disp = 0, rm_disp = 0;
   bool reg_is_mem = false, rm_is_mem = false;
 
   size_t tok_idx = 1;
-  parse_mov_operand(tokens, &tok_idx, &reg_token, &reg_disp, &reg_minus,
+  parse_mov_operand(info->tokens, &tok_idx, &reg_token, &reg_disp, &reg_minus,
                     &reg_is_mem);
   if (reg_disp == 8) {
-    if (str_idx >= nof_input_strings) {
+    if (str_idx >= info->nof_input_strings) {
       fprintf(stderr,
               "mov failed: not enough input strings, needed %ld got %ld\n",
-              str_idx, nof_input_strings);
+              str_idx, info->nof_input_strings);
       return false;
     }
-    char *disp_str = input_strings[str_idx++];
+    char *disp_str = info->input_strings[str_idx++];
     remove_dollar_sign(disp_str);
     int actual_displacement = atoi(disp_str);
     reg_disp = actual_displacement;
   }
-  parse_mov_operand(tokens, &tok_idx, &rm_token, &rm_disp, &rm_minus,
+  parse_mov_operand(info->tokens, &tok_idx, &rm_token, &rm_disp, &rm_minus,
                     &rm_is_mem);
   if (rm_disp == 8) {
-    if (str_idx >= nof_input_strings) {
+    if (str_idx >= info->nof_input_strings) {
       fprintf(stderr,
               "mov failed: not enough input strings, needed %ld got %ld\n",
-              str_idx, nof_input_strings);
+              str_idx, info->nof_input_strings);
       return false;
     }
-    char *disp_str = input_strings[str_idx++];
+    char *disp_str = info->input_strings[str_idx++];
     remove_dollar_sign(disp_str);
     int actual_displacement = atoi(disp_str);
     rm_disp = actual_displacement;
@@ -752,17 +698,28 @@ int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
 
   if (reg_is_mem) {
     // Handle immediate move
-    printf("IMMEDIATE MOVE REG: %d\n", rm_token);
     uint8_t register_byte = 0xb8 + get_rm_reg_bits_from_reg(rm_token);
-    buffer_append(&state->sections[state->text_idx].content, &register_byte, 1);
+    machine_code[machine_code_len++] = register_byte;
     if (is_token_64bit(rm_token)) {
       // TODO: add REX
       uint64_t value = displacement;
-      buffer_append(&state->sections[state->text_idx].content, &value, 8);
+      if (machine_code_len + sizeof(uint64_t) > 10) {
+        fprintf(stderr, "mov failed: not enough bytes!\n");
+        return false;
+      }
+      memcpy(machine_code + machine_code_len, &value, sizeof(uint64_t));
+      machine_code += sizeof(uint64_t);
+      add_new_inst(state, machine_code, machine_code_len, COMPLETE);
       return true;
     }
+    if (machine_code_len + sizeof(uint32_t) > 10) {
+      fprintf(stderr, "mov failed: not enough bytes!\n");
+      return false;
+    }
     uint32_t value = displacement;
-    buffer_append(&state->sections[state->text_idx].content, &value, 4);
+    memcpy(machine_code + machine_code_len, &value, sizeof(uint32_t));
+    machine_code += sizeof(uint32_t);
+    add_new_inst(state, machine_code, machine_code_len, COMPLETE);
     return true;
   }
 
@@ -796,11 +753,7 @@ int opcode_mov(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
   }
   printf("\n");
 
-  buffer_append(&state->sections[state->text_idx].content, machine_code,
-                machine_code_len);
-  state->current_text_offset += machine_code_len;
-
-  free(machine_code);
+  add_new_inst(state, machine_code, machine_code_len, COMPLETE);
   return true;
 }
 
