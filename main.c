@@ -6,7 +6,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// add rela to ELF
+// Improve data struct
+// Two passes
+// Separate instructions into units
+// handle functions better
+// store all info on rodata labels better
+// How are lea addresses and relocations determined
+// store info on text labels
+// jmp
+// cmp
 
 int main(int argc, char **argv) {
   asm_state_t state = {};

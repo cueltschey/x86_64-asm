@@ -3,6 +3,7 @@
 #include "lex.h"
 #include "state.h"
 #include <elf.h>
+#include <stdlib.h>
 
 // Opcode handlers
 int opcode_push(asm_state_t *state, int tokens[MAX_LINE_SIZE],
@@ -105,9 +106,7 @@ bool handle_label(asm_state_t *state, int label_tok, char *label_name) {
               label_name);
       return false;
     }
-    rodata_label_t new_entry;
-    new_entry.name = label_name;
-    state->rodata_entries[state->nof_rodata_entries++] = new_entry;
+    state->nof_rodata_entries++;
     break;
   }
   default:
@@ -148,7 +147,7 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
     if (directive_str[strlen(directive_str) - 1] == '"')
       directive_str[strlen(directive_str) - 1] = '\0';
 
-    state->rodata_entries[state->nof_rodata_entries - 1].offset =
+    state->rodata_entries[state->nof_rodata_entries - 1] =
         state->sections[state->rodata_idx].size;
     buffer_append(&state->sections[state->rodata_idx].content, directive_str,
                   strlen(directive_str));
@@ -221,7 +220,6 @@ bool handle_directive(asm_state_t *state, int tokens[MAX_LINE_SIZE],
     if ((sym = find_symbol(state, ".rodata")) == NULL)
       add_symbol(state, ".rodata", state->rodata_idx, 0, STT_SECTION,
                  STB_LOCAL);
-    add_rela(state, ".rodata", 0x6, RELOC_PC_RELATIVE, -4);
     return true;
   }
   case TOK_SECTION_GNUSTACK:
@@ -976,27 +974,28 @@ int opcode_lea(asm_state_t *state, int tokens[MAX_LINE_SIZE], size_t nof_tokens,
 
   machine_code[machine_code_len++] = modrm_byte;
 
-  size_t rodata_label_len = strlen(rodata_label);
-  rodata_label[rodata_label_len] = ':';
-  rodata_label[rodata_label_len + 1] = '\0';
-
-  uint64_t *value = NULL;
-
-  for (size_t i = 0; i < state->nof_rodata_entries; i++) {
-    printf("DEBUG: %s\n", state->rodata_entries[i].name);
-    if (strcmp(state->rodata_entries[i].name, rodata_label) == 0) {
-      value = &state->rodata_entries[i].offset;
-      break;
-    }
-  }
-  if (value == NULL) {
-    fprintf(stderr, "lea failed: no such rodata value %s\n", rodata_label);
+  rodata_label += 3; // Skip .LC
+  size_t label_index = atoi(rodata_label);
+  if (label_index > 1024) {
+    fprintf(stderr, "lea failed: cannot get index of constant %s\n",
+            rodata_label);
     return false;
   }
+  if (label_index >= state->nof_rodata_entries) {
+    fprintf(stderr, "lea failed: constant index %ld does not exist\n",
+            label_index);
+    return false;
+  }
+
+  uint64_t addend = state->rodata_entries[label_index] - 4; // subtract addend 4
+
+  size_t offset = state->current_text_offset + 3; // 3 bytes for the instruction
+  add_rela(state, ".rodata", offset, RELOC_PC_RELATIVE, addend);
 
   buffer_append(&state->sections[state->text_idx].content, machine_code,
                 machine_code_len);
 
-  buffer_append(&state->sections[state->text_idx].content, value, 4);
+  uint32_t value = 0; // use 0 as placeholder for linker
+  buffer_append(&state->sections[state->text_idx].content, &value, 4);
   return true;
 }

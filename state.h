@@ -56,12 +56,6 @@ typedef struct elf_symbol_s {
   bool global;
 } elf_symbol_t;
 
-typedef enum asm_mode_e {
-  TEXT = 0,
-  RODATA,
-  GNU_STACK,
-} asm_mode_t;
-
 typedef enum {
   RELOC_ABSOLUTE,
   RELOC_PC_RELATIVE,
@@ -76,10 +70,11 @@ typedef struct elf_reloc_s {
   int64_t addend;
 } elf_reloc_t;
 
-typedef struct rodata_label_s {
-  const char *name;
-  uint64_t offset;
-} rodata_label_t;
+typedef enum asm_mode_e {
+  TEXT = 0,
+  RODATA,
+  GNU_STACK,
+} asm_mode_t;
 
 typedef struct asm_state_s {
   // File paths
@@ -105,7 +100,7 @@ typedef struct asm_state_s {
   size_t rela_text_idx;
 
   // Label data
-  rodata_label_t rodata_entries[MAX_RODATA_ENTRIES];
+  uint64_t rodata_entries[MAX_RODATA_ENTRIES];
   size_t nof_rodata_entries;
 
   // ELF data

@@ -35,6 +35,9 @@ void assembler_init(asm_state_t *state) {
   // Symbol 0: NULL symbol
   add_symbol(state, "", SHN_UNDEF, 0, STT_NOTYPE, STB_LOCAL);
 
+  for (size_t i = 0; i < state->nof_sections; i++)
+    buffer_init(&state->sections[i].content);
+
   // Initialize string tables with the required initial NULL byte
   buffer_append(&state->sections[state->strtab_idx].content, "\0", 1);
   buffer_append(&state->sections[state->shstrtab_idx].content, "\0", 1);

@@ -35,18 +35,10 @@ lex.yy.c: lex.l lex.h
 clean:
 	rm -f $(TARGET) $(OBJS) *.o core *.out lex.yy.c
 
-test: $(TARGET) test_asm/hello.s
-	@echo "Testing with test_asm/hello.s"
-	./$(TARGET) test_asm/hello.s -o hello.o
-	@echo "--- readelf -a hello.o ---"
-	@readelf -a hello.o
-	@echo "--- objdump -d hello.o ---"
-	@objdump -d hello.o
-	@echo "--- Linking hello.o ---"
-	gcc hello.o -o hello_exec
-	@echo "--- Running ./test_exec ; echo \$$? ---"
-	./hello_exec
-	@echo $$?
-	@echo "-------------------------"
+test:
+	@echo "Testing test_asm/hello.s"
+	./test_asm.sh $(TARGET) test_asm/hello.s
+	@echo "Testing test_asm/if.s"
+	./test_asm.sh $(TARGET) test_asm/if.s
 
 .PHONY: all clean test_asm
