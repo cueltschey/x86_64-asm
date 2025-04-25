@@ -111,6 +111,7 @@ typedef struct func_s {
   const char *name;
   uint64_t size;
   uint64_t location;
+  uint16_t sec_idx;
   bool is_global;
 } func_t;
 
@@ -134,6 +135,8 @@ typedef struct text_state_s {
   const char *file_name;
 
   asm_buf_t *rodata_buffer;
+
+  size_t text_sec_idx;
 } text_state_t;
 
 typedef struct asm_state_s {

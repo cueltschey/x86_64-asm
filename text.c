@@ -67,6 +67,7 @@ bool handle_label(text_state_t *state, line_info_t *info) {
     if (label_tok == TOK_IDENT_TAG) {
       label_name[strlen(label_name) - 1] = '\0'; // remove :
       func_t new_func = {};
+      new_func.sec_idx = state->text_sec_idx;
       new_func.is_global = false;
       new_func.name = strdup(label_name);
       state->functions[state->nof_functions++] = new_func;
@@ -651,10 +652,6 @@ void add_rex_if_required(int reg_token, int rm_token, uint8_t *machine_code,
     machine_code[(*machine_code_len)++] = rex;
   }
 }
-void remove_dollar_sign(char *str) {
-  if (str[0] == '$')
-    str++;
-}
 
 int opcode_mov(text_state_t *state, line_info_t *info) {
   if (info->nof_tokens < 3) {
@@ -680,7 +677,8 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
       return false;
     }
     char *disp_str = info->input_strings[str_idx++];
-    remove_dollar_sign(disp_str);
+    if (disp_str[0] == '$')
+      disp_str++;
     int actual_displacement = atoi(disp_str);
     reg_disp = actual_displacement;
   }
@@ -693,7 +691,8 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
       return false;
     }
     char *disp_str = info->input_strings[str_idx++];
-    remove_dollar_sign(disp_str);
+    if (disp_str[0] == '$')
+      disp_str++;
     int actual_displacement = atoi(disp_str);
     rm_disp = actual_displacement;
   }
@@ -791,7 +790,8 @@ int opcode_sub(text_state_t *state, line_info_t *info) {
       return false;
     }
     char *disp_str = info->input_strings[str_idx++];
-    remove_dollar_sign(disp_str);
+    if (disp_str[0] == '$')
+      disp_str++;
     int actual_displacement = atoi(disp_str);
     reg_disp = actual_displacement;
   }
@@ -804,7 +804,8 @@ int opcode_sub(text_state_t *state, line_info_t *info) {
       return false;
     }
     char *disp_str = info->input_strings[str_idx++];
-    remove_dollar_sign(disp_str);
+    if (disp_str[0] == '$')
+      disp_str++;
     int actual_displacement = atoi(disp_str);
     rm_disp = actual_displacement;
   }
@@ -881,6 +882,7 @@ int opcode_call(text_state_t *state, line_info_t *info) {
   func_t new_func = {};
   new_func.is_global = true;
   new_func.location = 0;
+  new_func.sec_idx = SHN_UNDEF;
   new_func.name = strdup(called_function);
   state->functions[state->nof_functions++] = new_func;
 

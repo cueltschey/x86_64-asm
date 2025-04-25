@@ -4,11 +4,9 @@
 #include <elf.h>
 #include <stdlib.h>
 
-// Improve data struct
-// Two passes
-// Separate instructions into units
-// handle functions better
-// store info on text labels
+// 1. parse text, get instructions define labels and directives
+// 2. write necessary symbols
+// 3. handle jmp text labels
 // jmp
 // cmp
 

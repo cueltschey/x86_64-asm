@@ -109,6 +109,25 @@ void assembler_init(asm_state_t *state) {
   buffer_append(&state->sections[state->shstrtab_idx].content, "\0", 1);
 
   state->text_state.rodata_buffer = &state->sections[state->rodata_idx].content;
+  state->text_state.text_sec_idx = state->text_idx;
+}
+
+bool assembler_process_symbols(asm_state_t *state) {
+  // local functions first
+  for (size_t i = 0; i < state->text_state.nof_functions; i++) {
+    func_t *f = &state->text_state.functions[i];
+    if (!f->is_global) {
+      add_symbol(state, f->name, f->sec_idx, f->location, STT_FUNC, STB_LOCAL);
+    }
+  }
+  // then global functions
+  for (size_t i = 0; i < state->text_state.nof_functions; i++) {
+    func_t *f = &state->text_state.functions[i];
+    if (f->is_global) {
+      add_symbol(state, f->name, f->sec_idx, f->location, STT_FUNC, STB_GLOBAL);
+    }
+  }
+  return true;
 }
 
 bool assemble_file(const char *input_file, const char *output_file) {
