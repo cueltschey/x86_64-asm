@@ -2,27 +2,68 @@
 #include "asm.h"
 #include "elf.h"
 #include "lex.h"
+#include "log.h"
 #include "state.h"
 #include "text.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-bool add_new_inst(text_state_t *state, uint8_t *machine_code,
-                  size_t machine_code_len, inst_status_t status,
-                  rela_info_t *rela) {
-  // Increase size if needed
-  if (state->nof_instructions + 1 > state->inst_capacity) {
-    state->instructions =
-        (inst_t *)realloc(state->instructions, state->inst_capacity * 2);
+void print_text_debug(text_state_t *state) {
+  ASM_DEBUG("--- finished parsing .text ---");
+  ASM_DEBUG("current text size: %ld", state->current_text_offset);
+  ASM_DEBUG("");
+
+  ASM_DEBUG(".rodata entries:");
+  uint8_t *rodata_ptr = state->rodata_buffer->data;
+  size_t current_offset = 0;
+  for (size_t i = 0; i < state->nof_rodata_entries; i++) {
+    ASM_DEBUG("\t(%zu) %s (offset: %zu)", i, (char *)(rodata_ptr),
+              current_offset);
+    rodata_ptr += state->rodata_entries[i];
+    current_offset += state->rodata_entries[i];
   }
-  inst_t new_inst;
-  new_inst.machine_code = machine_code;
-  new_inst.machine_code_len = machine_code_len;
-  new_inst.status = status;
-  new_inst.rela = rela;
-  state->instructions[state->nof_instructions++] = new_inst;
-  return true;
+  ASM_DEBUG("");
+
+  ASM_DEBUG(".text labels:");
+  for (size_t i = 0; i < state->nof_text_labels; i++) {
+    ASM_DEBUG("\t.L%ld", i);
+  }
+  ASM_DEBUG("");
+
+  ASM_DEBUG("defined functions:");
+  for (size_t i = 0; i < state->nof_functions; i++) {
+    ASM_DEBUG("\t(%ld) %s", i, state->functions[i].name);
+    ASM_DEBUG("\t   binding: %s location: %ld size: %ld",
+              state->functions[i].is_global ? "global" : "local",
+              state->functions[i].location, state->functions[i].size);
+  }
+  ASM_DEBUG("");
+
+  ASM_DEBUG("defined instructions:");
+  for (size_t i = 0; i < state->nof_instructions; i++) {
+    if (log_level >= DEBUG) {
+      printf("[DEBUG]\t\t(%ld)", i);
+      for (size_t j = 0; j < state->instructions[i].machine_code_len; j++) {
+        printf(" 0x%02x", state->instructions[i].machine_code[j]);
+      }
+      printf("\n");
+    }
+    switch (state->instructions[i].status) {
+    case COMPLETE:
+      ASM_DEBUG("\t   COMPLETE");
+      break;
+    case LEA_REQUIRES_OFFSET:
+      ASM_DEBUG("\t   LEA_REQUIRES_OFFSET");
+      break;
+    case JMP_REQUIRES_OFFSET:
+      ASM_DEBUG("\t   JMP_REQUIRES_OFFSET");
+      break;
+    default:
+      ASM_DEBUG("\t   UNKNOWN");
+      break;
+    }
+  }
 }
 
 void assembler_init(asm_state_t *state) {
@@ -70,64 +111,16 @@ void assembler_init(asm_state_t *state) {
   state->text_state.rodata_buffer = &state->sections[state->rodata_idx].content;
 }
 
-char *get_asm_state_info(const asm_state_t *state) {
-  size_t bufsize = 8192;
-  char *buffer = malloc(bufsize);
-  if (!buffer)
-    return NULL;
-
-  size_t offset = 0;
-  offset += snprintf(buffer + offset, bufsize - offset,
-                     "ASM State:\n"
-                     "  input_file: %s\n"
-                     "  output_file: %s\n",
-                     state->input_file, state->output_file);
-
-  offset +=
-      snprintf(buffer + offset, bufsize - offset,
-               "  Current text offset: %lu\n"
-               "  Indexes:\n"
-               "    note_idx: %zu\n"
-               "    symtab_idx: %zu\n"
-               "    strtab_idx: %zu\n"
-               "    shstrtab_idx: %zu\n"
-               "  Symbols (%zu total):\n",
-               state->text_idx, state->note_idx, state->symtab_idx,
-               state->strtab_idx, state->shstrtab_idx, state->nof_symbols);
-
-  for (size_t i = 0; i < state->nof_symbols && i < MAX_SYMBOLS; ++i) {
-    char symbol_buf[128];
-    snprintf(symbol_buf, sizeof(symbol_buf), "  Symbol[%ld]: name=%s\n", i,
-             state->symbols[i].name);
-    ;
-    offset += snprintf(buffer + offset, bufsize - offset, "%s", symbol_buf);
-  }
-
-  offset += snprintf(buffer + offset, bufsize - offset,
-                     "  Sections (%zu total):\n", state->nof_sections);
-
-  for (size_t i = 0; i < state->nof_sections && i < MAX_SECTIONS; ++i) {
-    char section_buf[128];
-
-    snprintf(section_buf, sizeof(section_buf),
-             "  Section[%ld]: name=%s, content=%s\n", i,
-             state->sections[i].name, (char *)state->sections[i].content.data);
-    offset += snprintf(buffer + offset, bufsize - offset, "%s", section_buf);
-  }
-
-  return buffer;
-}
-
 bool assemble_file(const char *input_file, const char *output_file) {
   asm_state_t state;
   assembler_init(&state);
   state.input_file = strdup(input_file);
   state.output_file = strdup(output_file);
-  printf("Assembling file: %s\n", state.input_file);
+  ASM_INFO("Assembling file: %s\n", state.input_file);
   yyin = fopen(state.input_file, "r");
   if (!yyin) {
     perror("fopen failed");
-    fprintf(stderr, "Error opening input file: %s\n", state.input_file);
+    ASM_ERROR("Error opening input file: %s\n", state.input_file);
     return false;
   }
 
@@ -143,8 +136,7 @@ bool assemble_file(const char *input_file, const char *output_file) {
     switch (current_token) {
     case TOK_NEWLINE: {
       if (!handle_line(&state.text_state, &current_info)) {
-        fprintf(stderr, "%s line %d: parsing failed\n", state.input_file,
-                line_num);
+        ASM_ERROR("%s line %d: parsing failed\n", state.input_file, line_num);
         return false;
       }
       current_info.nof_tokens = 0;
@@ -166,21 +158,19 @@ bool assemble_file(const char *input_file, const char *output_file) {
           strdup(yytext);
       break;
     case TOK_UNKNOWN:
-      fprintf(stderr, "%s line %d: encountered unknown token %s\n",
-              state.input_file, line_num, yytext);
+      ASM_ERROR("%s line %d: encountered unknown token %s\n", state.input_file,
+                line_num, yytext);
       return false;
     }
     current_info.tokens[current_info.nof_tokens++] = current_token;
   }
 
+  print_text_debug(&state.text_state);
+
   if (!write_elf_object_file(&state)) {
-    fprintf(stderr, "Failed to write to ELF file %s\n", state.output_file);
+    ASM_ERROR("Failed to write to ELF file %s\n", state.output_file);
     ret = false;
   }
-
-  char *info_str = get_asm_state_info(&state);
-  if (info_str)
-    printf("%s\n", info_str);
 
   return ret;
 }

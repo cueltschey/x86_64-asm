@@ -2,11 +2,26 @@
 #include "text.h"
 #include "elf.h"
 #include "lex.h"
+#include "log.h"
 #include "state.h"
-#include <elf.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
+
+bool add_new_inst(text_state_t *state, uint8_t *machine_code,
+                  size_t machine_code_len, inst_status_t status,
+                  rela_info_t *rela) {
+  // Increase size if needed
+  if (state->nof_instructions + 1 > state->inst_capacity) {
+    state->instructions =
+        (inst_t *)realloc(state->instructions, state->inst_capacity * 2);
+  }
+  inst_t new_inst;
+  new_inst.machine_code = machine_code;
+  new_inst.machine_code_len = machine_code_len;
+  new_inst.status = status;
+  new_inst.rela = rela;
+  state->instructions[state->nof_instructions++] = new_inst;
+  state->current_text_offset += machine_code_len;
+  return true;
+}
 
 bool tok_is_label(int tok) {
   return tok == TOK_RODATA_LABEL || tok == TOK_FUNC_END ||
@@ -32,8 +47,7 @@ bool handle_line(text_state_t *state, line_info_t *info) { // reset text offset
   else if (tok_is_machine_code(info->tokens[0]))
     return handle_machine_code(state, info);
   else
-    fprintf(stderr, "handle line: unexpected first token: %d\n",
-            info->tokens[0]);
+    ASM_ERROR("handle line: unexpected first token: %d\n", info->tokens[0]);
   return false;
 }
 
@@ -46,7 +60,7 @@ bool handle_label(text_state_t *state, line_info_t *info) {
   switch (state->parse_mode) {
   case TEXT: {
     if (label_name == NULL) {
-      fprintf(stderr, "Expected label name in .text\n");
+      ASM_ERROR("Expected label name in .text\n");
       return false;
     }
     // Function definition
@@ -67,7 +81,7 @@ bool handle_label(text_state_t *state, line_info_t *info) {
       label_name += 4;                           // skip .LFB
       size_t func_idx = atoi(label_name);
       if (func_idx >= state->nof_functions) {
-        fprintf(stderr, "Function index out of bounds %ld\n", func_idx);
+        ASM_ERROR("Function index out of bounds %ld\n", func_idx);
         return false;
       }
       state->functions[func_idx].location = state->current_text_offset;
@@ -79,7 +93,7 @@ bool handle_label(text_state_t *state, line_info_t *info) {
       label_name += 4;                           // skip .LFB
       size_t func_idx = atoi(label_name);
       if (func_idx >= state->nof_functions) {
-        fprintf(stderr, "Function index out of bounds %ld\n", func_idx);
+        ASM_ERROR("Function index out of bounds %ld\n", func_idx);
         return false;
       }
       state->functions[func_idx].size =
@@ -87,13 +101,12 @@ bool handle_label(text_state_t *state, line_info_t *info) {
       return true;
     }
 
-    fprintf(stderr, "Got unexpected label in .text: %d", label_tok);
+    ASM_ERROR("Got unexpected label in .text: %d", label_tok);
     return false;
   }
   case RODATA: {
     if (label_tok != TOK_RODATA_LABEL) {
-      fprintf(stderr, "Expected rodata constant label but got: %s\n",
-              label_name);
+      ASM_ERROR("Expected rodata constant label but got: %s\n", label_name);
       return false;
     }
     // .LC[0-9]
@@ -118,7 +131,7 @@ bool handle_directive(text_state_t *state, line_info_t *info) {
   switch (info->tokens[0]) {
   case TOK_FILEHEADER: {
     if (directive_str == NULL) {
-      fprintf(stderr, ".file directive requires string\n");
+      ASM_ERROR(".file directive requires string\n");
       return false;
     }
     // Remove quotes
@@ -133,7 +146,7 @@ bool handle_directive(text_state_t *state, line_info_t *info) {
   }
   case TOK_STRINGDEF: {
     if (state->parse_mode != RODATA) {
-      fprintf(stderr, "Encountered .string outside of rodata\n");
+      ASM_ERROR("Encountered .string outside of rodata\n");
       return false;
     }
 
@@ -148,11 +161,11 @@ bool handle_directive(text_state_t *state, line_info_t *info) {
   }
   case TOK_GLOBLDEF: {
     if (state->parse_mode != TEXT) {
-      fprintf(stderr, "Encountered .globl outside of .text\n");
+      ASM_ERROR("Encountered .globl outside of .text\n");
       return false;
     }
     if (directive_str == NULL) {
-      fprintf(stderr, ".globl requires string\n");
+      ASM_ERROR(".globl requires string\n");
       return false;
     }
     // Locate function and set to global
@@ -177,7 +190,7 @@ bool handle_directive(text_state_t *state, line_info_t *info) {
     // handle section below
     break;
   default:
-    fprintf(stderr, "Unexpected directive\n");
+    ASM_ERROR("Unexpected directive\n");
     return false;
   }
 
@@ -194,7 +207,7 @@ bool handle_directive(text_state_t *state, line_info_t *info) {
     return true;
   }
   default:
-    fprintf(stderr, "unknown .section directive: %s", directive_str);
+    ASM_ERROR("unknown .section directive: %s", directive_str);
     return false;
   }
 }
@@ -243,8 +256,8 @@ int opcode_ret(text_state_t *state) {
 
 int opcode_push(text_state_t *state, line_info_t *info) {
   if (info->nof_tokens != 2) {
-    fprintf(stderr, "push encoding failed: expected 2 operands but got %ld\n",
-            info->nof_tokens);
+    ASM_ERROR("push encoding failed: expected 2 operands but got %ld\n",
+              info->nof_tokens);
     return false;
   }
   size_t machine_code_len = 0;
@@ -328,8 +341,8 @@ int opcode_push(text_state_t *state, line_info_t *info) {
     break;
 
   default:
-    fprintf(stderr, "push encoding failed: unsupported operand token: %d\n",
-            info->tokens[1]);
+    ASM_ERROR("push encoding failed: unsupported operand token: %d\n",
+              info->tokens[1]);
     free(machine_code);
     return false;
   }
@@ -603,7 +616,7 @@ bool parse_mov_operand(int tokens[MAX_LINE_SIZE], size_t *tok_idx, int *reg,
       (*tok_idx)++;
       *reg = tokens[(*tok_idx)++];
       if (tokens[(*tok_idx)++] != TOK_CLOSEPAREN) {
-        fprintf(stderr, "expected )\n");
+        ASM_ERROR("expected )\n");
         return false;
       }
       return true;
@@ -645,7 +658,7 @@ void remove_dollar_sign(char *str) {
 
 int opcode_mov(text_state_t *state, line_info_t *info) {
   if (info->nof_tokens < 3) {
-    fprintf(stderr, "mov failed: not enough operands\n");
+    ASM_ERROR("mov failed: not enough operands\n");
     return false;
   }
 
@@ -662,9 +675,8 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
                     &reg_is_mem);
   if (reg_disp == 8) {
     if (str_idx >= info->nof_input_strings) {
-      fprintf(stderr,
-              "mov failed: not enough input strings, needed %ld got %ld\n",
-              str_idx, info->nof_input_strings);
+      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld\n",
+                str_idx, info->nof_input_strings);
       return false;
     }
     char *disp_str = info->input_strings[str_idx++];
@@ -676,9 +688,8 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
                     &rm_is_mem);
   if (rm_disp == 8) {
     if (str_idx >= info->nof_input_strings) {
-      fprintf(stderr,
-              "mov failed: not enough input strings, needed %ld got %ld\n",
-              str_idx, info->nof_input_strings);
+      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld\n",
+                str_idx, info->nof_input_strings);
       return false;
     }
     char *disp_str = info->input_strings[str_idx++];
@@ -691,7 +702,7 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
   rm_disp = rm_minus ? -rm_disp : rm_disp;
 
   if (reg_disp > 0 && rm_disp > 0) {
-    fprintf(stderr, "mov failed: both operands have a displacement\n");
+    ASM_ERROR("mov failed: both operands have a displacement\n");
     return false;
   }
 
@@ -706,7 +717,7 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
       // TODO: add REX
       uint64_t value = displacement;
       if (machine_code_len + sizeof(uint64_t) > 10) {
-        fprintf(stderr, "mov failed: not enough bytes!\n");
+        ASM_ERROR("mov failed: not enough bytes!\n");
         return false;
       }
       memcpy(machine_code + machine_code_len, &value, sizeof(uint64_t));
@@ -715,7 +726,7 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
       return true;
     }
     if (machine_code_len + sizeof(uint32_t) > 10) {
-      fprintf(stderr, "mov failed: not enough bytes!\n");
+      ASM_ERROR("mov failed: not enough bytes!\n");
       return false;
     }
     uint32_t value = displacement;
@@ -735,7 +746,7 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
   int reg_bits = get_rm_reg_bits_from_reg(reg_token);
   int rm_bits = get_rm_reg_bits_from_reg(rm_token);
   if (reg_bits < 0 || rm_bits < 0) {
-    fprintf(stderr, "mov failed: could not get reg or rm bits from register\n");
+    ASM_ERROR("mov failed: could not get reg or rm bits from register\n");
     return false;
   }
 
@@ -753,7 +764,6 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
   if (displacement != 0) {
     machine_code[machine_code_len++] = displacement;
   }
-  printf("\n");
 
   add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL);
   return true;
@@ -761,7 +771,7 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
 
 int opcode_sub(text_state_t *state, line_info_t *info) {
   if (info->nof_tokens < 3) {
-    fprintf(stderr, "mov failed: not enough operands\n");
+    ASM_ERROR("mov failed: not enough operands\n");
     return false;
   }
 
@@ -776,9 +786,8 @@ int opcode_sub(text_state_t *state, line_info_t *info) {
                     &reg_is_mem);
   if (reg_disp == 8) {
     if (str_idx >= info->nof_input_strings) {
-      fprintf(stderr,
-              "mov failed: not enough input strings, needed %ld got %ld\n",
-              str_idx, info->nof_input_strings);
+      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld\n",
+                str_idx, info->nof_input_strings);
       return false;
     }
     char *disp_str = info->input_strings[str_idx++];
@@ -790,9 +799,8 @@ int opcode_sub(text_state_t *state, line_info_t *info) {
                     &rm_is_mem);
   if (rm_disp == 8) {
     if (str_idx >= info->nof_input_strings) {
-      fprintf(stderr,
-              "mov failed: not enough input strings, needed %ld got %ld\n",
-              str_idx, info->nof_input_strings);
+      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld\n",
+                str_idx, info->nof_input_strings);
       return false;
     }
     char *disp_str = info->input_strings[str_idx++];
@@ -854,18 +862,18 @@ int opcode_sub(text_state_t *state, line_info_t *info) {
 
 int opcode_call(text_state_t *state, line_info_t *info) {
   if (info->nof_tokens < 3) {
-    fprintf(stderr, "call failed: 2 operands required\n");
+    ASM_ERROR("call failed: 2 operands required\n");
     return false;
   }
   if (info->tokens[0] != OPCODE_CALL || info->tokens[1] != TOK_IDENT ||
       info->tokens[2] != TOK_PLT_FLAG) {
-    fprintf(stderr, "call failed: got unexpected operand tokens\n");
+    ASM_ERROR("call failed: got unexpected operand tokens\n");
     return false;
   }
   uint8_t machine_code[5] = {0xe8, 0x00, 0x00, 0x00, 0x00};
 
   if (info->nof_input_strings < 1) {
-    fprintf(stderr, "call failed: function name required\n");
+    ASM_ERROR("call failed: function name required\n");
     return false;
   }
   char *called_function = info->input_strings[0];
@@ -889,11 +897,11 @@ int opcode_call(text_state_t *state, line_info_t *info) {
 int opcode_lea(text_state_t *state, line_info_t *info) {
 
   if (info->nof_tokens < 3) {
-    fprintf(stderr, "lea failed: not enough operands\n");
+    ASM_ERROR("lea failed: not enough operands\n");
     return false;
   }
   if (info->nof_input_strings < 1) {
-    fprintf(stderr, "lea failed: rodata label required\n");
+    ASM_ERROR("lea failed: rodata label required\n");
     return false;
   }
 
@@ -903,16 +911,16 @@ int opcode_lea(text_state_t *state, line_info_t *info) {
   size_t tok_idx = 1;
 
   if (info->tokens[tok_idx++] != TOK_RODATA_LABEL_REF) {
-    fprintf(stderr, "lea failed: expected rodata reference in operand 1\n");
+    ASM_ERROR("lea failed: expected rodata reference in operand 1\n");
     return false;
   }
   if (info->tokens[tok_idx++] != TOK_OPENPAREN) {
-    fprintf(stderr, "expected (\n");
+    ASM_ERROR("expected (\n");
     return false;
   }
   reg_token = info->tokens[tok_idx++];
   if (info->tokens[tok_idx++] != TOK_CLOSEPAREN) {
-    fprintf(stderr, "expected )\n");
+    ASM_ERROR("expected )\n");
     return false;
   }
   rm_token = info->tokens[tok_idx++];
@@ -936,13 +944,11 @@ int opcode_lea(text_state_t *state, line_info_t *info) {
   rodata_label += 3; // Skip .LC
   size_t label_index = atoi(rodata_label);
   if (label_index > 1024) {
-    fprintf(stderr, "lea failed: cannot get index of constant %s\n",
-            rodata_label);
+    ASM_ERROR("lea failed: cannot get index of constant %s\n", rodata_label);
     return false;
   }
   if (label_index >= state->nof_rodata_entries) {
-    fprintf(stderr, "lea failed: constant index %ld does not exist\n",
-            label_index);
+    ASM_ERROR("lea failed: constant index %ld does not exist\n", label_index);
     return false;
   }
 
