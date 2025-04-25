@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "--- Assembling to Object ---"
-./$1 $2 -o test.o
+./$1 $2 -o test.o -v
 rc=$?
 if [ $rc -ne 0 ]; then
   echo "Assembling failed with code $rc"

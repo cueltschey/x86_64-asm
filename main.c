@@ -1,5 +1,6 @@
 #include "args.h"
 #include "asm.h"
+#include "log.h"
 #include <elf.h>
 #include <stdlib.h>
 
@@ -17,7 +18,8 @@ int main(int argc, char **argv) {
     usage(argv);
     return EXIT_FAILURE;
   }
-  printf("Assembling %s into %s\n", args.input_file, args.output_file);
+  log_level = args.log_level;
+  ASM_INFO("Assembling %s into %s\n", args.input_file, args.output_file);
   if (!assemble_file(args.input_file, args.output_file))
     return EXIT_FAILURE;
 
