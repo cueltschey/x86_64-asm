@@ -8,7 +8,8 @@
 #define REX_PREFIX_B 0x01
 
 bool add_new_inst(text_state_t *state, uint8_t *machine_code,
-                  size_t machine_code_len, inst_status_t status);
+                  size_t machine_code_len, inst_status_t status,
+                  rela_info_t *rela);
 
 // Functions to handle control flow
 bool handle_line(text_state_t *state, line_info_t *info);

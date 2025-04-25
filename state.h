@@ -93,35 +93,43 @@ typedef enum inst_status_e {
   JMP_REQUIRES_OFFSET
 } inst_status_t;
 
+typedef struct rela_info_s {
+  uint64_t addend;
+  size_t offset;
+  reloc_type_t type;
+  const char *name;
+} rela_info_t;
+
 typedef struct inst_s {
   uint8_t *machine_code;
   size_t machine_code_len;
-
   inst_status_t status;
+  rela_info_t *rela;
 } inst_t;
 
 typedef struct func_s {
   const char *name;
   uint64_t size;
   uint64_t location;
-  bool is_global = false;
+  bool is_global;
 } func_t;
 
 typedef struct text_state_s {
   text_parse_mode_t parse_mode;
-  uint64_t current_text_offset = 0;
+  uint64_t current_text_offset;
 
   uint64_t rodata_entries[MAX_RODATA_ENTRIES];
-  size_t nof_rodata_entries = 0;
+  size_t nof_rodata_entries;
 
   uint64_t text_labels[MAX_RODATA_ENTRIES];
-  size_t nof_text_labels = 0;
+  size_t nof_text_labels;
 
   func_t functions[MAX_FUNCTIONS];
-  size_t nof_functions = 0;
+  size_t nof_functions;
 
   inst_t *instructions;
-  size_t nof_instructions = 0;
+  size_t nof_instructions;
+  size_t inst_capacity;
 
   const char *file_name;
 

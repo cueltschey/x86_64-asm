@@ -2,10 +2,28 @@
 #include "asm.h"
 #include "elf.h"
 #include "lex.h"
+#include "state.h"
 #include "text.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+bool add_new_inst(text_state_t *state, uint8_t *machine_code,
+                  size_t machine_code_len, inst_status_t status,
+                  rela_info_t *rela) {
+  // Increase size if needed
+  if (state->nof_instructions + 1 > state->inst_capacity) {
+    state->instructions =
+        (inst_t *)realloc(state->instructions, state->inst_capacity * 2);
+  }
+  inst_t new_inst;
+  new_inst.machine_code = machine_code;
+  new_inst.machine_code_len = machine_code_len;
+  new_inst.status = status;
+  new_inst.rela = rela;
+  state->instructions[state->nof_instructions++] = new_inst;
+  return true;
+}
 
 void assembler_init(asm_state_t *state) {
   memset(state, 0, sizeof(asm_state_t));
@@ -15,7 +33,11 @@ void assembler_init(asm_state_t *state) {
   state->text_state.parse_mode = TEXT;
   state->text_state.nof_instructions = 0;
   state->text_state.nof_rodata_entries = 0;
+  state->text_state.nof_text_labels = 0;
+  state->text_state.nof_functions = 0;
+  state->text_state.current_text_offset = 0;
   state->text_state.instructions = (inst_t *)malloc(INIT_INSTRUCTION_COUNT);
+  state->text_state.inst_capacity = INIT_INSTRUCTION_COUNT;
 
   state->text_idx = -1;
   state->note_idx = -1;
@@ -122,7 +144,7 @@ bool assemble_file(const char *input_file, const char *output_file) {
     case TOK_NEWLINE: {
       if (!handle_line(&state.text_state, &current_info)) {
         fprintf(stderr, "%s line %d: parsing failed\n", state.input_file,
-                line_num + 1);
+                line_num);
         return false;
       }
       current_info.nof_tokens = 0;
@@ -138,12 +160,14 @@ bool assemble_file(const char *input_file, const char *output_file) {
     case TOK_IDENT_TAG:
     case TOK_PLT_FLAG:
     case TOK_RODATA_LABEL_REF:
+    case TOK_FUNC_END:
+    case TOK_FUNC_START:
       current_info.input_strings[current_info.nof_input_strings++] =
           strdup(yytext);
       break;
     case TOK_UNKNOWN:
       fprintf(stderr, "%s line %d: encountered unknown token %s\n",
-              state.input_file, line_num + 1, yytext);
+              state.input_file, line_num, yytext);
       return false;
     }
     current_info.tokens[current_info.nof_tokens++] = current_token;
