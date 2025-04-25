@@ -33,7 +33,7 @@ lex.yy.c: lex.l lex.h
 
 
 clean:
-	rm -f $(TARGET) $(OBJS) *.o core *.out lex.yy.c
+	rm -f $(TARGET) $(OBJS) *.o core *.out lex.yy.c test_exec
 
 test:
 	@echo "Testing test_asm/hello.s"
