@@ -30,6 +30,8 @@ bool opcode_mov(text_state_t *state, line_info_t *info);
 
 bool opcode_sub(text_state_t *state, line_info_t *info);
 
+bool opcode_cmp(text_state_t *state, line_info_t *info);
+
 bool opcode_call(text_state_t *state, line_info_t *info);
 
 bool opcode_lea(text_state_t *state, line_info_t *info);

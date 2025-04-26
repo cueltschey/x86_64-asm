@@ -161,7 +161,8 @@ bool assembler_process_symbols(asm_state_t *state) {
           referenced_label->text_offset - extra->jmp_location;
       // if it fits in one byte
       if (actual_jmp_value >= -128 && actual_jmp_value <= 127) {
-        instr->machine_code[1] = actual_jmp_value & 0xff;
+        instr->machine_code[1] =
+            (actual_jmp_value & 0xff) - instr->machine_code_len;
       } else {
         // unconditional
         size_t jmp_value_start = 0;
@@ -182,6 +183,7 @@ bool assembler_process_symbols(asm_state_t *state) {
           jmp_value_start = 2;
           added_bytes = 4;
         }
+        actual_jmp_value -= instr->machine_code_len;
         memcpy(instr->machine_code + jmp_value_start, &actual_jmp_value, 4);
         // ensure all locations further on are correct
         if (!apply_text_shift(&state->text_state, i, added_bytes))

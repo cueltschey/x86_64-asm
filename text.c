@@ -191,8 +191,10 @@ bool handle_directive(text_state_t *state, line_info_t *info) {
     directive_str[strlen(directive_str) - 1] = '\0';
 
     state->rodata_entries[state->nof_rodata_entries - 1] =
-        strlen(directive_str);
+        strlen(directive_str) + 1;
     buffer_append(state->rodata_buffer, directive_str, strlen(directive_str));
+    uint8_t null_byte = '\0';
+    buffer_append(state->rodata_buffer, &null_byte, 1);
     return true;
   }
   case TOK_GLOBLDEF: {
@@ -279,6 +281,10 @@ bool handle_machine_code(text_state_t *state, line_info_t *info) {
   case OPCODE_JL:
   case OPCODE_JLE:
     return opcode_jmp(state, info);
+  case OPCODE_CMPQ:
+  case OPCODE_CMPL:
+  case OPCODE_CMPB:
+    return opcode_cmp(state, info);
   default:
     ASM_WARN("Encountered unknown instruction: 0x%02x", info->tokens[0]);
     break;
@@ -906,6 +912,110 @@ bool opcode_sub(text_state_t *state, line_info_t *info) {
   return true;
 }
 
+bool opcode_cmp(text_state_t *state, line_info_t *info) {
+  if (info->nof_tokens < 3) {
+    ASM_ERROR("mov failed: not enough operands");
+    return false;
+  }
+
+  size_t str_idx = 0;
+  int reg_token = -1, rm_token = -1;
+  bool reg_minus = false, rm_minus = false;
+  int reg_disp = 0, rm_disp = 0;
+  bool reg_is_mem = false, rm_is_mem = false;
+
+  size_t tok_idx = 1;
+  parse_mov_operand(info->tokens, &tok_idx, &reg_token, &reg_disp, &reg_minus,
+                    &reg_is_mem);
+  if (reg_disp == 8) {
+    if (str_idx >= info->nof_input_strings) {
+      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld",
+                str_idx, info->nof_input_strings);
+      return false;
+    }
+    char *disp_str = info->input_strings[str_idx++];
+    if (disp_str[0] == '$')
+      disp_str++;
+    int actual_displacement = atoi(disp_str);
+    reg_disp = actual_displacement;
+  }
+  parse_mov_operand(info->tokens, &tok_idx, &rm_token, &rm_disp, &rm_minus,
+                    &rm_is_mem);
+  if (rm_disp == 8) {
+    if (str_idx >= info->nof_input_strings) {
+      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld",
+                str_idx, info->nof_input_strings);
+      return false;
+    }
+    char *disp_str = info->input_strings[str_idx++];
+    if (disp_str[0] == '$')
+      disp_str++;
+    int actual_displacement = atoi(disp_str);
+    rm_disp = actual_displacement;
+  }
+
+  reg_disp = reg_minus ? -reg_disp : reg_disp;
+  rm_disp = rm_minus ? -rm_disp : rm_disp;
+  int displacement = rm_disp != 0 ? rm_disp : reg_disp;
+
+  uint8_t *machine_code = malloc(12);
+  size_t machine_code_len = 0;
+
+  if (reg_is_mem) {
+    uint8_t opcode_byte = 0x81;
+    uint8_t modrm_byte =
+        (0b01 << 6) | (0b111 << 3) | get_rm_reg_bits_from_reg(rm_token);
+    if (is_token_64bit(rm_token)) {
+      uint64_t value_byte = displacement;
+      if (displacement >= -127 && displacement <= 128) {
+        uint8_t single_byte_disp = displacement & 0xff;
+        opcode_byte = 0x80;
+        machine_code[machine_code_len++] = opcode_byte;
+        machine_code[machine_code_len++] = modrm_byte;
+        machine_code[machine_code_len++] = single_byte_disp;
+      } else {
+        machine_code[machine_code_len++] = opcode_byte;
+        machine_code[machine_code_len++] = modrm_byte;
+        memcpy(machine_code + machine_code_len, &value_byte, sizeof(uint64_t));
+        machine_code_len += sizeof(uint64_t);
+      }
+    } else if (is_token_32bit(rm_token)) {
+      uint32_t value_byte = displacement;
+      machine_code[machine_code_len++] = opcode_byte;
+      machine_code[machine_code_len++] = modrm_byte;
+      memcpy(machine_code + machine_code_len, &value_byte, sizeof(uint32_t));
+      machine_code_len += sizeof(uint32_t);
+    } else if (is_token_16bit(rm_token)) {
+      uint16_t value_byte = displacement;
+      machine_code[machine_code_len++] = opcode_byte;
+      machine_code[machine_code_len++] = modrm_byte;
+      memcpy(machine_code + machine_code_len, &value_byte, sizeof(uint16_t));
+      machine_code_len += sizeof(uint16_t);
+    } else {
+      uint8_t value_byte = displacement;
+      machine_code[machine_code_len++] = opcode_byte;
+      machine_code[machine_code_len++] = modrm_byte;
+      machine_code[machine_code_len++] = value_byte;
+    }
+
+    // add the mem val
+    machine_code[machine_code_len++] = reg_disp & 0xff;
+    add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
+    return true;
+  }
+  add_rex_if_required(reg_token, rm_token, machine_code, &machine_code_len);
+  uint8_t opcode_byte = 0x3b;
+  uint8_t modrm_byte = (0b11 << 6) |
+                       ((get_rm_reg_bits_from_reg(reg_token) & 0xff) << 3) |
+                       (get_rm_reg_bits_from_reg(rm_token) & 0xff);
+  machine_code[machine_code_len++] = opcode_byte;
+  machine_code[machine_code_len++] = modrm_byte;
+
+  add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
+
+  return true;
+}
+
 bool opcode_call(text_state_t *state, line_info_t *info) {
   if (info->nof_tokens < 3) {
     ASM_ERROR("call failed: 2 operands required");
@@ -1010,7 +1120,7 @@ bool opcode_lea(text_state_t *state, line_info_t *info) {
   // Get the beginning of the str
 
   uint64_t addend = 0;
-  if (state->nof_rodata_entries > 2)
+  if (label_index >= 1)
     addend = state->rodata_entries[label_index - 1];
   else
     addend = 0;

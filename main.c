@@ -4,8 +4,6 @@
 #include <elf.h>
 #include <stdlib.h>
 
-// 3. handle jmp text labels
-// jmp
 // cmp
 
 int main(int argc, char **argv) {
