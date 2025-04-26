@@ -4,8 +4,6 @@
 #include <elf.h>
 #include <stdlib.h>
 
-// 1. parse text, get instructions define labels and directives
-// 2. write necessary symbols
 // 3. handle jmp text labels
 // jmp
 // cmp
@@ -17,7 +15,7 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   log_level = args.log_level;
-  ASM_INFO("Assembling %s into %s\n", args.input_file, args.output_file);
+  ASM_INFO("Assembling %s into %s", args.input_file, args.output_file);
   if (!assemble_file(args.input_file, args.output_file))
     return EXIT_FAILURE;
 

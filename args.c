@@ -15,5 +15,5 @@ bool parse_args(int argc, char **argv, all_args_t *args) {
 }
 
 void usage(char **argv) {
-  printf("Usage: %s <assembly> [assembly] <object>\n", argv[0]);
+  ASM_ERROR("Usage: %s <assembly> [assembly] <object>", argv[0]);
 }

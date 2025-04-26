@@ -137,6 +137,7 @@ extern FILE *yyin;
 #define OPCODE_JL 0x7C
 #define OPCODE_JLE 0x7E
 
+#define OPCODE_MOVB 0x88
 #define OPCODE_MOV 0x89
 #define OPCODE_LEAQ 0x8D
 #define OPCODE_LEAL 0x8D

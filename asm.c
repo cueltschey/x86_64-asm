@@ -27,7 +27,7 @@ void print_text_debug(text_state_t *state) {
 
   ASM_DEBUG(".text labels:");
   for (size_t i = 0; i < state->nof_text_labels; i++) {
-    ASM_DEBUG("\t.L%ld", i);
+    ASM_DEBUG("\t(%zu) %s", i, state->text_labels[i].label);
   }
   ASM_DEBUG("");
 
@@ -141,8 +141,55 @@ bool assembler_process_symbols(asm_state_t *state) {
   asm_buf_t *text_buf = &state->sections[state->text_idx].content;
   for (size_t i = 0; i < state->text_state.nof_instructions; i++) {
     inst_t *instr = &state->text_state.instructions[i];
+
+    if (instr->status == JMP_REQUIRES_OFFSET) {
+      jmp_extra_t *extra = instr->extra;
+      if (extra == NULL) {
+        ASM_ERROR("jmp instruction lacks required information");
+        return false;
+      }
+      text_label_t *referenced_label = NULL;
+      for (size_t j = 0; j < state->text_state.nof_text_labels; j++) {
+        if (strcmp(state->text_state.text_labels[j].label, extra->label) == 0)
+          referenced_label = &state->text_state.text_labels[j];
+      }
+      if (referenced_label == NULL) {
+        ASM_ERROR("no such text label %s", extra->label);
+        return false;
+      }
+      int32_t actual_jmp_value =
+          referenced_label->text_offset - extra->jmp_location;
+      // if it fits in one byte
+      if (actual_jmp_value >= -128 && actual_jmp_value <= 127) {
+        instr->machine_code[1] = actual_jmp_value & 0xff;
+      } else {
+        // unconditional
+        size_t jmp_value_start = 0;
+        size_t added_bytes = 0;
+        if (instr->machine_code[0] == 0xeb) {
+          instr->machine_code[0] = 0xe9;
+          jmp_value_start = 1;
+          added_bytes = 3;
+        } else {
+          // Convert to near opcode
+          if (instr->machine_code[0] < 0x70 || instr->machine_code[0] > 0x7f) {
+            ASM_ERROR("first byte of jmp instruction was incorrect 0x%02x",
+                      instr->machine_code[0]);
+            return false;
+          }
+          instr->machine_code[1] = 0x80 | (instr->machine_code[0] & 0x0f);
+          instr->machine_code[0] = 0x0f;
+          jmp_value_start = 2;
+          added_bytes = 4;
+        }
+        memcpy(instr->machine_code + jmp_value_start, &actual_jmp_value, 4);
+        // ensure all locations further on are correct
+        if (!apply_text_shift(&state->text_state, i, added_bytes))
+          return false;
+      }
+    }
+
     buffer_append(text_buf, instr->machine_code, instr->machine_code_len);
-    // TODO: handle jmp labels
     if (instr->rela != NULL)
       add_rela(state, instr->rela->name, instr->rela->offset, instr->rela->type,
                instr->rela->addend);
@@ -155,11 +202,11 @@ bool assemble_file(const char *input_file, const char *output_file) {
   assembler_init(&state);
   state.input_file = strdup(input_file);
   state.output_file = strdup(output_file);
-  ASM_INFO("Assembling file: %s\n", state.input_file);
+  ASM_INFO("Assembling file: %s", state.input_file);
   yyin = fopen(state.input_file, "r");
   if (!yyin) {
     perror("fopen failed");
-    ASM_ERROR("Error opening input file: %s\n", state.input_file);
+    ASM_ERROR("Error opening input file: %s", state.input_file);
     return false;
   }
 
@@ -175,7 +222,7 @@ bool assemble_file(const char *input_file, const char *output_file) {
     switch (current_token) {
     case TOK_NEWLINE: {
       if (!handle_line(&state.text_state, &current_info)) {
-        ASM_ERROR("%s line %d: parsing failed\n", state.input_file, line_num);
+        ASM_ERROR("%s line %d: parsing failed", state.input_file, line_num);
         return false;
       }
       current_info.nof_tokens = 0;
@@ -193,11 +240,13 @@ bool assemble_file(const char *input_file, const char *output_file) {
     case TOK_RODATA_LABEL_REF:
     case TOK_FUNC_END:
     case TOK_FUNC_START:
+    case TOK_TEXT_LABEL:
+    case TOK_TEXT_LABEL_REF:
       current_info.input_strings[current_info.nof_input_strings++] =
           strdup(yytext);
       break;
     case TOK_UNKNOWN:
-      ASM_ERROR("%s line %d: encountered unknown token %s\n", state.input_file,
+      ASM_ERROR("%s line %d: encountered unknown token %s", state.input_file,
                 line_num, yytext);
       return false;
     }
@@ -206,10 +255,13 @@ bool assemble_file(const char *input_file, const char *output_file) {
 
   print_text_debug(&state.text_state);
 
-  assembler_process_symbols(&state);
+  if (!assembler_process_symbols(&state)) {
+    ASM_ERROR("Symbol processing failed");
+    return false;
+  }
 
   if (!write_elf_object_file(&state)) {
-    ASM_ERROR("Failed to write to ELF file %s\n", state.output_file);
+    ASM_ERROR("Failed to write to ELF file %s", state.output_file);
     ret = false;
   }
 

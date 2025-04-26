@@ -112,7 +112,7 @@ jle               { return OPCODE_JLE; }
 movq              { return OPCODE_MOV; }
 movl              { return OPCODE_MOV; }
 movw              { return OPCODE_MOV; }
-movb              { return OPCODE_MOV; }
+movb              { return OPCODE_MOVB; }
 leaq              { return OPCODE_LEAQ; }
 leal              { return OPCODE_LEAL; }
 leaw              { return OPCODE_LEAW; }

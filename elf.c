@@ -42,7 +42,7 @@ void buffer_ensure_capacity(asm_buf_t *buf, size_t additional_needed) {
 
 elf_symbol_t *find_symbol(asm_state_t *state, const char *name) {
   if (!name) {
-    ASM_ERROR("Error: find_symbol called with NULL name\n");
+    ASM_ERROR("Error: find_symbol called with NULL name");
     return NULL;
   }
 
@@ -82,7 +82,7 @@ int add_symbol(asm_state_t *state, const char *name, uint16_t shndx,
   }
 
   if (state->nof_symbols >= MAX_SYMBOLS) {
-    ASM_ERROR("Maximum number of symbols reached\n");
+    ASM_ERROR("Maximum number of symbols reached");
     return -1;
   }
 
@@ -107,7 +107,7 @@ void add_section(asm_state_t *state, const char *name, Elf64_Word type,
                  Elf64_Xword flags, Elf64_Xword addralign,
                  Elf64_Xword entsize) {
   if (state->nof_sections >= MAX_SECTIONS) {
-    ASM_ERROR("Error: Maximum number of sections reached (%d)\n", MAX_SECTIONS);
+    ASM_ERROR("Error: Maximum number of sections reached (%d)", MAX_SECTIONS);
     exit(EXIT_FAILURE); // Or handle more gracefully
   }
   elf_section_t *sec = &state->sections[state->nof_sections];
@@ -227,7 +227,7 @@ void build_elf_rela(asm_state_t *state) {
       rel_type = R_X86_64_PLT32;
       break;
     default:
-      ASM_ERROR("Unknown relocation type: %d\n", r->type);
+      ASM_ERROR("Unknown relocation type: %d", r->type);
     }
 
     // Find the symbols index
@@ -370,7 +370,7 @@ bool write_elf_object_file(asm_state_t *state) {
       // Seek to the calculated offset (handles alignment padding)
       if (lseek(fd, sec->offset, SEEK_SET) == -1) {
         perror("lseek failed before writing section");
-        ASM_ERROR("Error seeking for section %s\n", sec->name);
+        ASM_ERROR("Error seeking for section %s", sec->name);
         free(section_headers); // Clean up allocated memory
         close(fd);
         return false;

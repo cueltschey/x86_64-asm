@@ -105,6 +105,7 @@ typedef struct inst_s {
   size_t machine_code_len;
   inst_status_t status;
   rela_info_t *rela;
+  void *extra;
 } inst_t;
 
 typedef struct func_s {
@@ -116,6 +117,16 @@ typedef struct func_s {
   uint8_t type;
 } func_t;
 
+typedef struct jmp_extra_s {
+  const char *label;
+  uint64_t jmp_location;
+} jmp_extra_t;
+
+typedef struct text_label_s {
+  const char *label;
+  uint64_t text_offset;
+} text_label_t;
+
 typedef struct text_state_s {
   text_parse_mode_t parse_mode;
   uint64_t current_text_offset;
@@ -123,7 +134,7 @@ typedef struct text_state_s {
   uint64_t rodata_entries[MAX_RODATA_ENTRIES];
   size_t nof_rodata_entries;
 
-  uint64_t text_labels[MAX_RODATA_ENTRIES];
+  text_label_t text_labels[MAX_RODATA_ENTRIES];
   size_t nof_text_labels;
 
   func_t functions[MAX_FUNCTIONS];

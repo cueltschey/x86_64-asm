@@ -9,7 +9,10 @@
 
 bool add_new_inst(text_state_t *state, uint8_t *machine_code,
                   size_t machine_code_len, inst_status_t status,
-                  rela_info_t *rela);
+                  rela_info_t *rela, void *extra);
+
+bool apply_text_shift(text_state_t *state, size_t instruction_start,
+                      size_t shift_by);
 
 // Functions to handle control flow
 bool handle_line(text_state_t *state, line_info_t *info);
@@ -21,16 +24,18 @@ bool handle_directive(text_state_t *state, line_info_t *info);
 bool handle_machine_code(text_state_t *state, line_info_t *info);
 
 // Insturction handlers
-int opcode_push(text_state_t *state, line_info_t *info);
+bool opcode_push(text_state_t *state, line_info_t *info);
 
-int opcode_mov(text_state_t *state, line_info_t *info);
+bool opcode_mov(text_state_t *state, line_info_t *info);
 
-int opcode_sub(text_state_t *state, line_info_t *info);
+bool opcode_sub(text_state_t *state, line_info_t *info);
 
-int opcode_call(text_state_t *state, line_info_t *info);
+bool opcode_call(text_state_t *state, line_info_t *info);
 
-int opcode_lea(text_state_t *state, line_info_t *info);
+bool opcode_lea(text_state_t *state, line_info_t *info);
+
+bool opcode_jmp(text_state_t *state, line_info_t *info);
 
 bool opcode_leave(text_state_t *state);
 
-int opcode_ret(text_state_t *state);
+bool opcode_ret(text_state_t *state);
