@@ -68,8 +68,9 @@ bool handle_label(text_state_t *state, line_info_t *info) {
       label_name[strlen(label_name) - 1] = '\0'; // remove :
       func_t new_func = {};
       new_func.sec_idx = state->text_sec_idx;
-      new_func.is_global = false;
+      new_func.is_global = true;
       new_func.name = strdup(label_name);
+      new_func.type = STT_FUNC;
       state->functions[state->nof_functions++] = new_func;
       return true;
     }
@@ -720,7 +721,7 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
         return false;
       }
       memcpy(machine_code + machine_code_len, &value, sizeof(uint64_t));
-      machine_code += sizeof(uint64_t);
+      machine_code_len += sizeof(uint64_t);
       add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL);
       return true;
     }
@@ -730,7 +731,7 @@ int opcode_mov(text_state_t *state, line_info_t *info) {
     }
     uint32_t value = displacement;
     memcpy(machine_code + machine_code_len, &value, sizeof(uint32_t));
-    machine_code += sizeof(uint32_t);
+    machine_code_len += sizeof(uint32_t);
     add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL);
     return true;
   }
@@ -871,7 +872,12 @@ int opcode_call(text_state_t *state, line_info_t *info) {
     ASM_ERROR("call failed: got unexpected operand tokens\n");
     return false;
   }
-  uint8_t machine_code[5] = {0xe8, 0x00, 0x00, 0x00, 0x00};
+  uint8_t *machine_code = malloc(5);
+  size_t machine_code_len = 0;
+  machine_code[machine_code_len++] = 0xe8;
+  // blank address for linker
+  for (size_t i = 0; i < 4; i++)
+    machine_code[machine_code_len++] = 0x00;
 
   if (info->nof_input_strings < 1) {
     ASM_ERROR("call failed: function name required\n");
@@ -884,14 +890,17 @@ int opcode_call(text_state_t *state, line_info_t *info) {
   new_func.location = 0;
   new_func.sec_idx = SHN_UNDEF;
   new_func.name = strdup(called_function);
+  new_func.type = STT_NOTYPE;
   state->functions[state->nof_functions++] = new_func;
 
-  rela_info_t rela;
-  rela.offset = state->current_text_offset - 4;
-  rela.addend = -4;
-  rela.type = RELOC_PLT;
+  rela_info_t *rela = (rela_info_t *)malloc(sizeof(rela_info_t));
+  memset(rela, 0, sizeof(rela_info_t));
+  rela->offset = state->current_text_offset + machine_code_len - 4;
+  rela->name = strdup(called_function);
+  rela->addend = -4;
+  rela->type = RELOC_PLT;
 
-  add_new_inst(state, machine_code, 5, COMPLETE, &rela);
+  add_new_inst(state, machine_code, machine_code_len, COMPLETE, rela);
 
   return true;
 }
@@ -954,21 +963,29 @@ int opcode_lea(text_state_t *state, line_info_t *info) {
     return false;
   }
 
-  uint64_t addend = state->rodata_entries[label_index] - 4; // subtract addend 4
+  // Get the beginning of the str
+
+  uint64_t addend = 0;
+  if (state->nof_rodata_entries > 2)
+    addend = state->rodata_entries[label_index - 1];
+  else
+    addend = 0;
+  addend -= 4;
 
   size_t offset = state->current_text_offset + 3; // 3 bytes for the instruction
-  rela_info_t rela;
-  rela.offset = offset;
-  rela.addend = addend;
-  rela.name = ".rodata";
-  rela.type = RELOC_PC_RELATIVE;
+  rela_info_t *rela = (rela_info_t *)malloc(sizeof(rela_info_t));
+  memset(rela, 0, sizeof(rela_info_t));
+  rela->offset = offset;
+  rela->addend = addend;
+  rela->name = strdup(".rodata");
+  rela->type = RELOC_PC_RELATIVE;
 
   // O placeholder for linker
   for (size_t i = 0; i < 4; i++)
     machine_code[machine_code_len++] = 0x00;
 
   add_new_inst(state, machine_code, machine_code_len, LEA_REQUIRES_OFFSET,
-               &rela);
+               rela);
 
   return true;
 }

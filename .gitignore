@@ -3,3 +3,4 @@ x86_64-asm
 lex.yy.c
 a.out
 hello_exec
+test_exec

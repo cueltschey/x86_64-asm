@@ -113,6 +113,7 @@ typedef struct func_s {
   uint64_t location;
   uint16_t sec_idx;
   bool is_global;
+  uint8_t type;
 } func_t;
 
 typedef struct text_state_s {

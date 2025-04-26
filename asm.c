@@ -113,19 +113,39 @@ void assembler_init(asm_state_t *state) {
 }
 
 bool assembler_process_symbols(asm_state_t *state) {
+  // .file symbol
+  add_symbol(state, state->text_state.file_name, SHN_ABS, 0, STT_FILE,
+             STB_LOCAL);
+
+  add_symbol(state, ".text", state->text_idx, 0, STT_SECTION, STB_LOCAL);
+  if (state->text_state.nof_rodata_entries > 0)
+    add_symbol(state, ".rodata", state->rodata_idx, 0, STT_SECTION, STB_LOCAL);
+
   // local functions first
   for (size_t i = 0; i < state->text_state.nof_functions; i++) {
     func_t *f = &state->text_state.functions[i];
     if (!f->is_global) {
-      add_symbol(state, f->name, f->sec_idx, f->location, STT_FUNC, STB_LOCAL);
+      add_symbol(state, f->name, f->sec_idx, f->location, f->type, STB_LOCAL);
+      state->symbols[state->nof_symbols - 1].size = f->size;
     }
   }
   // then global functions
   for (size_t i = 0; i < state->text_state.nof_functions; i++) {
     func_t *f = &state->text_state.functions[i];
     if (f->is_global) {
-      add_symbol(state, f->name, f->sec_idx, f->location, STT_FUNC, STB_GLOBAL);
+      add_symbol(state, f->name, f->sec_idx, f->location, f->type, STB_GLOBAL);
+      state->symbols[state->nof_symbols - 1].size = f->size;
     }
+  }
+
+  asm_buf_t *text_buf = &state->sections[state->text_idx].content;
+  for (size_t i = 0; i < state->text_state.nof_instructions; i++) {
+    inst_t *instr = &state->text_state.instructions[i];
+    buffer_append(text_buf, instr->machine_code, instr->machine_code_len);
+    // TODO: handle jmp labels
+    if (instr->rela != NULL)
+      add_rela(state, instr->rela->name, instr->rela->offset, instr->rela->type,
+               instr->rela->addend);
   }
   return true;
 }
@@ -185,6 +205,8 @@ bool assemble_file(const char *input_file, const char *output_file) {
   }
 
   print_text_debug(&state.text_state);
+
+  assembler_process_symbols(&state);
 
   if (!write_elf_object_file(&state)) {
     ASM_ERROR("Failed to write to ELF file %s\n", state.output_file);
