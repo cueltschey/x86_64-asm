@@ -97,6 +97,9 @@ int line_num = 0;
 \%gs      { return TOK_REG_GS; }
 \%ss      { return TOK_REG_SS; }
 
+cltd              { return OPCODE_CQD; }
+cqd               { return OPCODE_CQD; }
+cqo               { return OPCODE_CQO; }
 push              { return OPCODE_PUSH; }
 pushq             { return OPCODE_PUSH; }
 popw              { return OPCODE_POP; }

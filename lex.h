@@ -220,6 +220,8 @@ extern FILE *yyin;
 #define OPCODE_TESTB 0x84
 
 #define OPCODE_NOP 0x90
+#define OPCODE_CQO 0x98
+#define OPCODE_CQD 0x99
 #define OPCODE_SYSCALL 0x0F05
 #define OPCODE_LEAVE 0xC9
 

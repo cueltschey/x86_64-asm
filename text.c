@@ -354,6 +354,10 @@ bool handle_machine_code(text_state_t *state, line_info_t *info) {
     return opcode_nop(state);
   case OPCODE_POP:
     return opcode_pop(state, info);
+  case OPCODE_CQD:
+    return opcode_cqd(state);
+  case OPCODE_CQO:
+    return opcode_cqo(state);
   default:
     ASM_WARN("Encountered unknown instruction: 0x%02x", info->tokens[0]);
     break;
@@ -364,6 +368,21 @@ bool handle_machine_code(text_state_t *state, line_info_t *info) {
 bool opcode_leave(text_state_t *state) {
   uint8_t *machine_code = malloc(1);
   machine_code[0] = 0xc9;
+  add_new_inst(state, machine_code, 1, COMPLETE, NULL, NULL);
+  return true;
+}
+
+bool opcode_cqd(text_state_t *state) {
+  uint8_t *machine_code = malloc(1);
+  machine_code[0] = 0x99;
+  add_new_inst(state, machine_code, 1, COMPLETE, NULL, NULL);
+  return true;
+}
+
+bool opcode_cqo(text_state_t *state) {
+  uint8_t *machine_code = malloc(2);
+  machine_code[0] = 0x48;
+  machine_code[1] = 0x99;
   add_new_inst(state, machine_code, 1, COMPLETE, NULL, NULL);
   return true;
 }
