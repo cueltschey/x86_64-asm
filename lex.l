@@ -99,7 +99,10 @@ int line_num = 0;
 
 push              { return OPCODE_PUSH; }
 pushq             { return OPCODE_PUSH; }
-pop               { return OPCODE_POP; }
+popw              { return OPCODE_POP; }
+popl              { return OPCODE_POP; }
+popb              { return OPCODE_POP; }
+popq              { return OPCODE_POP; }
 call              { return OPCODE_CALL; }
 ret               { return OPCODE_RET; }
 jmp               { return OPCODE_JMP; }

@@ -46,6 +46,59 @@ bool apply_text_shift(text_state_t *state, size_t instruction_start,
   return true;
 }
 
+char *parse_cstring_escapes(const char *input) {
+  size_t len = strlen(input);
+  char *output = malloc(len + 1);
+  if (!output) {
+    perror("malloc failed");
+    exit(1);
+  }
+
+  size_t i = 0;
+  size_t j = 0;
+
+  while (i < len) {
+    if (input[i] == '\\') {
+      i++;
+      if (i >= len)
+        break;
+      switch (input[i]) {
+      case 'n':
+        output[j++] = '\n';
+        break;
+      case 't':
+        output[j++] = '\t';
+        break;
+      case 'r':
+        output[j++] = '\r';
+        break;
+      case '\\':
+        output[j++] = '\\';
+        break;
+      case '\'':
+        output[j++] = '\'';
+        break;
+      case '\"':
+        output[j++] = '\"';
+        break;
+      case '0':
+        output[j++] = '\0';
+        break;
+      default:
+        // Unknown escape, copy as-is
+        output[j++] = input[i];
+        break;
+      }
+    } else {
+      output[j++] = input[i];
+    }
+    i++;
+  }
+  output[j] = '\0'; // null terminate
+
+  return output;
+}
+
 bool tok_is_label(int tok) {
   return tok == TOK_RODATA_LABEL || tok == TOK_FUNC_END ||
          tok == TOK_FUNC_START || tok == TOK_IDENT_TAG || tok == TOK_TEXT_LABEL;
@@ -94,6 +147,7 @@ bool handle_label(text_state_t *state, line_info_t *info) {
       new_func.is_global = true;
       new_func.name = strdup(label_name);
       new_func.type = STT_FUNC;
+      new_func.defined_in_file = true;
       state->functions[state->nof_functions++] = new_func;
       return true;
     }
@@ -105,11 +159,16 @@ bool handle_label(text_state_t *state, line_info_t *info) {
       label_name[strlen(label_name) - 1] = '\0'; // remove :
       label_name += 4;                           // skip .LFB
       size_t func_idx = atoi(label_name);
-      if (func_idx >= state->nof_functions) {
-        ASM_ERROR("Function index out of bounds %ld", func_idx);
-        return false;
+      size_t file_defined_idx = 0;
+      for (size_t i = 0; i < state->nof_functions; i++) {
+        if (state->functions[i].defined_in_file) {
+          if (file_defined_idx == func_idx) {
+            state->functions[i].location = state->current_text_offset;
+            break;
+          }
+          file_defined_idx++;
+        }
       }
-      state->functions[func_idx].location = state->current_text_offset;
       return true;
     }
     // .LFE[0-9]
@@ -117,12 +176,17 @@ bool handle_label(text_state_t *state, line_info_t *info) {
       label_name[strlen(label_name) - 1] = '\0'; // remove :
       label_name += 4;                           // skip .LFB
       size_t func_idx = atoi(label_name);
-      if (func_idx >= state->nof_functions) {
-        ASM_ERROR("Function index out of bounds %ld", func_idx);
-        return false;
+      size_t file_defined_idx = 0;
+      for (size_t i = 0; i < state->nof_functions; i++) {
+        if (state->functions[i].defined_in_file) {
+          if (file_defined_idx == func_idx) {
+            state->functions[i].size =
+                state->current_text_offset - state->functions[i].location;
+            break;
+          }
+          file_defined_idx++;
+        }
       }
-      state->functions[func_idx].size =
-          state->current_text_offset - state->functions[func_idx].location;
       return true;
     }
 
@@ -190,9 +254,10 @@ bool handle_directive(text_state_t *state, line_info_t *info) {
     directive_str++;
     directive_str[strlen(directive_str) - 1] = '\0';
 
+    const char *parsed_string = parse_cstring_escapes(directive_str);
     state->rodata_entries[state->nof_rodata_entries - 1] =
-        strlen(directive_str) + 1;
-    buffer_append(state->rodata_buffer, directive_str, strlen(directive_str));
+        strlen(parsed_string) + 1;
+    buffer_append(state->rodata_buffer, parsed_string, strlen(parsed_string));
     uint8_t null_byte = '\0';
     buffer_append(state->rodata_buffer, &null_byte, 1);
     return true;
@@ -285,6 +350,10 @@ bool handle_machine_code(text_state_t *state, line_info_t *info) {
   case OPCODE_CMPL:
   case OPCODE_CMPB:
     return opcode_cmp(state, info);
+  case OPCODE_NOP:
+    return opcode_nop(state);
+  case OPCODE_POP:
+    return opcode_pop(state, info);
   default:
     ASM_WARN("Encountered unknown instruction: 0x%02x", info->tokens[0]);
     break;
@@ -295,6 +364,13 @@ bool handle_machine_code(text_state_t *state, line_info_t *info) {
 bool opcode_leave(text_state_t *state) {
   uint8_t *machine_code = malloc(1);
   machine_code[0] = 0xc9;
+  add_new_inst(state, machine_code, 1, COMPLETE, NULL, NULL);
+  return true;
+}
+
+bool opcode_nop(text_state_t *state) {
+  uint8_t *machine_code = malloc(1);
+  machine_code[0] = 0x90;
   add_new_inst(state, machine_code, 1, COMPLETE, NULL, NULL);
   return true;
 }
@@ -803,11 +879,19 @@ bool opcode_mov(text_state_t *state, line_info_t *info) {
   add_rex_if_required(reg_token, rm_token, machine_code, &machine_code_len);
 
   // Add opcode
-  machine_code[machine_code_len++] = info->tokens[0];
+  if (reg_disp != 0)
+    machine_code[machine_code_len++] = 0x8b;
+  else
+    machine_code[machine_code_len++] = 0x89;
 
   // Add Mod R/M byte
-  uint8_t modrm_byte =
-      ((mod_bits & 0b11) << 6) | ((reg_bits & 0b111) << 3) | (rm_bits & 0b111);
+  uint8_t modrm_byte = 0;
+  if (reg_disp != 0)
+    modrm_byte = ((mod_bits & 0b11) << 6) | ((rm_bits & 0b111) << 3) |
+                 (reg_bits & 0b111);
+  else
+    modrm_byte = ((mod_bits & 0b11) << 6) | ((reg_bits & 0b111) << 3) |
+                 (rm_bits & 0b111);
   machine_code[machine_code_len++] = modrm_byte;
 
   // Add displacement if any
@@ -1016,28 +1100,8 @@ bool opcode_cmp(text_state_t *state, line_info_t *info) {
   return true;
 }
 
-bool opcode_call(text_state_t *state, line_info_t *info) {
-  if (info->nof_tokens < 3) {
-    ASM_ERROR("call failed: 2 operands required");
-    return false;
-  }
-  if (info->tokens[0] != OPCODE_CALL || info->tokens[1] != TOK_IDENT ||
-      info->tokens[2] != TOK_PLT_FLAG) {
-    ASM_ERROR("call failed: got unexpected operand tokens");
-    return false;
-  }
-  uint8_t *machine_code = malloc(5);
-  size_t machine_code_len = 0;
-  machine_code[machine_code_len++] = 0xe8;
-  // blank address for linker
-  for (size_t i = 0; i < 4; i++)
-    machine_code[machine_code_len++] = 0x00;
-
-  if (info->nof_input_strings < 1) {
-    ASM_ERROR("call failed: function name required");
-    return false;
-  }
-  char *called_function = info->input_strings[0];
+bool handle_plt_call(text_state_t *state, char *called_function,
+                     uint8_t *machine_code, size_t machine_code_len) {
 
   func_t new_func = {};
   new_func.is_global = true;
@@ -1045,6 +1109,7 @@ bool opcode_call(text_state_t *state, line_info_t *info) {
   new_func.sec_idx = SHN_UNDEF;
   new_func.name = strdup(called_function);
   new_func.type = STT_NOTYPE;
+  new_func.defined_in_file = false;
   state->functions[state->nof_functions++] = new_func;
 
   rela_info_t *rela = (rela_info_t *)malloc(sizeof(rela_info_t));
@@ -1056,6 +1121,59 @@ bool opcode_call(text_state_t *state, line_info_t *info) {
 
   add_new_inst(state, machine_code, machine_code_len, COMPLETE, rela, NULL);
 
+  return true;
+}
+
+bool opcode_call(text_state_t *state, line_info_t *info) {
+  uint8_t *machine_code = malloc(5);
+  size_t machine_code_len = 0;
+  machine_code[machine_code_len++] = 0xe8;
+  // blank address for linker
+  for (size_t i = 0; i < 4; i++)
+    machine_code[machine_code_len++] = 0x00;
+
+  if (info->nof_input_strings < 1) {
+    ASM_ERROR("call failed: function name required");
+    return false;
+  }
+
+  char *called_function = info->input_strings[0];
+  if (info->nof_tokens == 3) {
+    if (info->tokens[0] != OPCODE_CALL || info->tokens[1] != TOK_IDENT ||
+        info->tokens[2] != TOK_PLT_FLAG) {
+      ASM_ERROR("call failed: got unexpected operand tokens");
+      return false;
+    }
+    return handle_plt_call(state, called_function, machine_code,
+                           machine_code_len);
+  }
+  if (info->nof_tokens < 2) {
+    ASM_ERROR("At least 2 operands required for call");
+    return false;
+  }
+
+  rela_info_t *rela = (rela_info_t *)malloc(sizeof(rela_info_t));
+  memset(rela, 0, sizeof(rela_info_t));
+  rela->offset = state->current_text_offset + machine_code_len - 4;
+  rela->name = strdup(called_function);
+  rela->addend = -4;
+  rela->type = RELOC_PLT;
+
+  add_new_inst(state, machine_code, machine_code_len, COMPLETE, rela, NULL);
+  return true;
+}
+
+bool opcode_pop(text_state_t *state, line_info_t *info) {
+  if (info->nof_tokens < 2) {
+    ASM_ERROR("pop requires two operands");
+    return false;
+  }
+  uint8_t opcode_byte =
+      0x58 + (get_rm_reg_bits_from_reg(info->tokens[1]) & 0xff);
+  uint8_t *machine_code = malloc(1);
+  size_t machine_code_len = 0;
+  machine_code[machine_code_len++] = opcode_byte;
+  add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
   return true;
 }
 

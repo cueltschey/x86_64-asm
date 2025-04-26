@@ -115,6 +115,7 @@ typedef struct func_s {
   uint16_t sec_idx;
   bool is_global;
   uint8_t type;
+  bool defined_in_file;
 } func_t;
 
 typedef struct jmp_extra_s {

@@ -34,10 +34,14 @@ bool opcode_cmp(text_state_t *state, line_info_t *info);
 
 bool opcode_call(text_state_t *state, line_info_t *info);
 
+bool opcode_pop(text_state_t *state, line_info_t *info);
+
 bool opcode_lea(text_state_t *state, line_info_t *info);
 
 bool opcode_jmp(text_state_t *state, line_info_t *info);
 
 bool opcode_leave(text_state_t *state);
+
+bool opcode_nop(text_state_t *state);
 
 bool opcode_ret(text_state_t *state);

@@ -43,5 +43,7 @@ test:
 	./test_asm.sh $(TARGET) test_asm/hello.s
 	@echo "Testing test_asm/if.s"
 	./test_asm.sh $(TARGET) test_asm/if.s
+	@echo "Testing test_asm/func.s"
+	./test_asm.sh $(TARGET) test_asm/func.s
 
 .PHONY: all clean test_asm
