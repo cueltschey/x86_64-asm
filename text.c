@@ -156,13 +156,10 @@ bool handle_label(text_state_t *state, line_info_t *info) {
     }
     // .LFB[0-9]
     if (label_tok == TOK_FUNC_START) {
-      label_name[strlen(label_name) - 1] = '\0'; // remove :
-      label_name += 4;                           // skip .LFB
-      size_t func_idx = atoi(label_name);
       size_t file_defined_idx = 0;
       for (size_t i = 0; i < state->nof_functions; i++) {
         if (state->functions[i].defined_in_file) {
-          if (file_defined_idx == func_idx) {
+          if (file_defined_idx == state->local_function_idx) {
             state->functions[i].location = state->current_text_offset;
             break;
           }
@@ -173,20 +170,19 @@ bool handle_label(text_state_t *state, line_info_t *info) {
     }
     // .LFE[0-9]
     if (label_tok == TOK_FUNC_END) {
-      label_name[strlen(label_name) - 1] = '\0'; // remove :
-      label_name += 4;                           // skip .LFB
-      size_t func_idx = atoi(label_name);
       size_t file_defined_idx = 0;
       for (size_t i = 0; i < state->nof_functions; i++) {
         if (state->functions[i].defined_in_file) {
-          if (file_defined_idx == func_idx) {
+          if (file_defined_idx == state->local_function_idx) {
             state->functions[i].size =
                 state->current_text_offset - state->functions[i].location;
+            ASM_DEBUG("Found function %zu", state->local_function_idx);
             break;
           }
           file_defined_idx++;
         }
       }
+      state->local_function_idx++;
       return true;
     }
 
@@ -358,6 +354,9 @@ bool handle_machine_code(text_state_t *state, line_info_t *info) {
     return opcode_cqd(state);
   case OPCODE_CQO:
     return opcode_cqo(state);
+  case OPCODE_DIVB:
+  case OPCODE_IDIVQ:
+    return opcode_mul(state, info);
   default:
     ASM_WARN("Encountered unknown instruction: 0x%02x", info->tokens[0]);
     break;
@@ -1304,5 +1303,81 @@ bool opcode_jmp(text_state_t *state, line_info_t *info) {
   extra->label = strdup(info->input_strings[0]);
   add_new_inst(state, machine_code, machine_code_len, JMP_REQUIRES_OFFSET, NULL,
                extra);
+  return true;
+}
+
+bool opcode_mul(text_state_t *state, line_info_t *info) {
+  if (info->nof_tokens < 2) {
+    ASM_ERROR("mul requires 2 operands");
+    return false;
+  }
+  if (info->nof_input_strings < 1) {
+    ASM_ERROR("mul requires label str");
+    return false;
+  }
+  uint8_t *machine_code = malloc(10);
+  size_t machine_code_len = 0;
+  // get opcode
+  machine_code[machine_code_len++] = info->tokens[0] & 0xff;
+  size_t tok_idx = 1;
+  int rm_token = 0;
+  int rm_disp = 0;
+  bool minus = false;
+  bool rm_is_mem = false;
+  parse_mov_operand(info->tokens, &tok_idx, &rm_token, &rm_disp, &minus,
+                    &rm_is_mem);
+  if (rm_disp == 8) {
+    char *disp_str = info->input_strings[1];
+    if (disp_str[0] == '$')
+      disp_str++;
+    int actual_displacement = atoi(disp_str);
+    rm_disp = actual_displacement;
+  }
+  rm_disp = minus ? -rm_disp : rm_disp;
+  uint8_t modrm_byte = 0;
+  uint8_t mod_bits = 0, reg_bits = 0,
+          rm_bits = get_rm_reg_bits_from_reg(rm_token);
+  // TODO: handle imulw and the like
+
+  if (rm_disp == 0) {
+    mod_bits = 0b11;
+  } else if (rm_disp >= -127 && rm_disp <= 128) {
+    mod_bits = 0b01;
+  } else {
+    mod_bits = 0b10;
+  }
+
+  if (memcmp(info->input_strings[0], "test", 4) == 0) {
+    reg_bits = 0b000;
+  } else if (memcmp(info->input_strings[0], "not", 3) == 0) {
+    reg_bits = 0b010;
+  } else if (memcmp(info->input_strings[0], "neg", 3) == 0) {
+    reg_bits = 0b011;
+  } else if (memcmp(info->input_strings[0], "mul", 3) == 0) {
+    reg_bits = 0b100;
+  } else if (memcmp(info->input_strings[0], "imul", 4) == 0) {
+    reg_bits = 0b101;
+  } else if (memcmp(info->input_strings[0], "div", 3) == 0) {
+    reg_bits = 0b110;
+  } else if (memcmp(info->input_strings[0], "idiv", 4) == 0) {
+    reg_bits = 0b111;
+  }
+
+  modrm_byte = (mod_bits << 6) | (reg_bits << 3) | rm_bits;
+  machine_code[machine_code_len++] = modrm_byte;
+
+  if (rm_disp != 0) {
+    ASM_DEBUG("RM DISP: %d", rm_disp);
+    if (mod_bits == 0b01) {
+      machine_code[machine_code_len++] = rm_disp & 0xff;
+    } else {
+      int32_t disp_val = rm_disp;
+      memcpy(machine_code + machine_code_len, &disp_val, sizeof(int32_t));
+      machine_code_len += sizeof(int32_t);
+    }
+  }
+
+  add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
+
   return true;
 }

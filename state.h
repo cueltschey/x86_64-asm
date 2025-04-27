@@ -150,6 +150,8 @@ typedef struct text_state_s {
   asm_buf_t *rodata_buffer;
 
   size_t text_sec_idx;
+
+  size_t local_function_idx;
 } text_state_t;
 
 typedef struct asm_state_s {

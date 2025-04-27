@@ -40,6 +40,8 @@ bool opcode_lea(text_state_t *state, line_info_t *info);
 
 bool opcode_jmp(text_state_t *state, line_info_t *info);
 
+bool opcode_mul(text_state_t *state, line_info_t *info);
+
 bool opcode_leave(text_state_t *state);
 
 bool opcode_cqd(text_state_t *state);

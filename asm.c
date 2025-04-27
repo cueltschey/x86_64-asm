@@ -110,6 +110,7 @@ void assembler_init(asm_state_t *state) {
 
   state->text_state.rodata_buffer = &state->sections[state->rodata_idx].content;
   state->text_state.text_sec_idx = state->text_idx;
+  state->text_state.local_function_idx = 0;
 }
 
 bool assembler_process_symbols(asm_state_t *state) {
@@ -244,6 +245,8 @@ bool assemble_file(const char *input_file, const char *output_file) {
     case TOK_FUNC_START:
     case TOK_TEXT_LABEL:
     case TOK_TEXT_LABEL_REF:
+    case OPCODE_DIVB:
+    case OPCODE_IDIVQ:
       current_info.input_strings[current_info.nof_input_strings++] =
           strdup(yytext);
       break;
