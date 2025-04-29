@@ -755,19 +755,20 @@ bool parse_mov_operand(int tokens[MAX_LINE_SIZE], size_t *tok_idx, int *reg,
     *minus = true;
   }
   if (tokens[(*tok_idx)] == TOK_NUM) {
-    // TODO: get offset
     *displacement = 8;
     (*tok_idx)++;
-    if (tokens[(*tok_idx)] == TOK_OPENPAREN) {
-      (*tok_idx)++;
-      *reg = tokens[(*tok_idx)++];
-      if (tokens[(*tok_idx)++] != TOK_CLOSEPAREN) {
-        ASM_ERROR("expected )");
-        return false;
-      }
-      return true;
-    }
     *reg_is_mem = true;
+  }
+  if (tokens[(*tok_idx)] == TOK_OPENPAREN) {
+    *reg_is_mem = false;
+    (*tok_idx)++;
+    *reg = tokens[(*tok_idx)++];
+    if (tokens[(*tok_idx)++] != TOK_CLOSEPAREN) {
+      ASM_ERROR("expected )");
+      return false;
+    }
+    return true;
+  } else if (*reg_is_mem) {
     return true;
   }
   *reg = tokens[(*tok_idx)++];
@@ -1195,6 +1196,89 @@ bool opcode_pop(text_state_t *state, line_info_t *info) {
   return true;
 }
 
+bool lea_mem_expr(text_state_t *state, line_info_t *info) {
+  int displacement = 0, base_reg = -1, index_reg = -1, scale = 1;
+  size_t tok_idx = 1;
+  size_t str_idx = 0;
+  if (info->tokens[tok_idx] == TOK_NUM) {
+    if (info->nof_input_strings < str_idx + 1) {
+      ASM_ERROR("lea displacement value expected");
+      return false;
+    }
+    displacement = atoi(info->input_strings[str_idx++]);
+    tok_idx++;
+  }
+  if (info->tokens[tok_idx++] != TOK_OPENPAREN) {
+    ASM_ERROR("lea parsing ( expected");
+    return false;
+  }
+  index_reg = info->tokens[tok_idx++];
+  if (info->tokens[tok_idx] >= TOK_REG_RAX &&
+      info->tokens[tok_idx] <= TOK_REG_SS) {
+    base_reg = index_reg;
+    index_reg = info->tokens[tok_idx++];
+  }
+  if (info->tokens[tok_idx] == TOK_NUM) {
+    if (info->nof_input_strings < str_idx + 1) {
+      ASM_ERROR("lea failed: not enough input strings");
+      return false;
+    }
+    scale = atoi(info->input_strings[str_idx++]);
+    tok_idx++;
+  }
+  if (info->tokens[tok_idx++] != TOK_CLOSEPAREN) {
+    ASM_ERROR("lea failed: expected )");
+    return false;
+  }
+
+  int dest_reg = info->tokens[tok_idx];
+
+  uint8_t *machine_code = malloc(7);
+  size_t machine_code_len = 0;
+
+  machine_code[machine_code_len++] = 0x8d;
+  uint8_t modrm_byte =
+      (0b00 << 6) | (0b101 << 3) | get_rm_reg_bits_from_reg(dest_reg);
+  machine_code[machine_code_len++] = modrm_byte;
+
+  uint8_t scale_bits = 0b00;
+  switch (scale) {
+  case 1:
+    scale_bits = 0b00;
+    break;
+  case 2:
+    scale_bits = 0b01;
+    break;
+  case 4:
+    scale_bits = 0b10;
+    break;
+  case 8:
+    scale_bits = 0b11;
+    break;
+  default:
+    ASM_ERROR("Unexpected scaling %d", scale);
+    return false;
+  }
+  uint8_t base_bits = 0b000;
+  if (base_reg == -1) {
+    base_bits = 0b100;
+  } else {
+    base_bits = get_rm_reg_bits_from_reg(base_reg);
+  }
+  uint8_t sib_byte = (scale_bits << 6) |
+                     (get_rm_reg_bits_from_reg(index_reg) << 3) | base_bits;
+  machine_code[machine_code_len++] = sib_byte;
+
+  if (displacement > 0) {
+    uint32_t disp_val = displacement;
+    memcpy(machine_code + machine_code_len, &disp_val, 4);
+    machine_code_len += 4;
+  }
+
+  add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
+  return true;
+}
+
 bool opcode_lea(text_state_t *state, line_info_t *info) {
 
   if (info->nof_tokens < 3) {
@@ -1211,10 +1295,15 @@ bool opcode_lea(text_state_t *state, line_info_t *info) {
 
   size_t tok_idx = 1;
 
-  if (info->tokens[tok_idx++] != TOK_RODATA_LABEL_REF) {
-    ASM_ERROR("lea failed: expected rodata reference in operand 1");
-    return false;
+  if (info->tokens[tok_idx] != TOK_RODATA_LABEL_REF) {
+    if (info->tokens[tok_idx] != TOK_NUM &&
+        info->tokens[tok_idx] != TOK_OPENPAREN) {
+      ASM_ERROR("memory expression lea got unexpected arguments");
+      return false;
+    }
+    return lea_mem_expr(state, info);
   }
+  tok_idx++;
   if (info->tokens[tok_idx++] != TOK_OPENPAREN) {
     ASM_ERROR("expected (");
     return false;

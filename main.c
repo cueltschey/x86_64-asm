@@ -4,7 +4,11 @@
 #include <elf.h>
 #include <stdlib.h>
 
-// cmp
+// Fix parse operand
+// include imm registers
+// include deeper call stack
+// separate directives / sections for functions
+// update flex rules
 
 int main(int argc, char **argv) {
   all_args_t args = {};

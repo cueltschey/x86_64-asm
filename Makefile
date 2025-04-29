@@ -38,14 +38,22 @@ lex.yy.c: lex.l lex.h
 clean:
 	rm -f $(TARGET) $(OBJS) *.o core *.out lex.yy.c test_exec
 
-test:
-	@echo "Testing test_asm/hello.s"
-	./test_asm.sh $(TARGET) test_asm/hello.s
-	@echo "Testing test_asm/if.s"
-	./test_asm.sh $(TARGET) test_asm/if.s
-	@echo "Testing test_asm/func.s"
-	./test_asm.sh $(TARGET) test_asm/func.s
-	@echo "Testing test_asm/rand.s"
-	./test_asm.sh $(TARGET) test_asm/rand.s
+test: $(TARGET)
+	@for file in $(wildcard samples/*.s); do \
+		echo "Running ./assemble_and_run.sh on $$file"; \
+		./assemble_and_run.sh $(TARGET) "$$file"; \
+		if [ $$? -ne 0 ]; then \
+			break; \
+		fi; \
+	done
+
+self: $(TARGET)
+	@for file in $(wildcard self_assemble/*.s); do \
+		echo "$(TARGET) $$file -o ${$$file%s}o"; \
+		./$(TARGET) "$$file" -o "${$$file%s}o"; \
+		if [ $$? -ne 0 ]; then \
+			break; \
+		fi; \
+	done
 
 .PHONY: all clean test_asm

@@ -100,6 +100,10 @@ int line_num = 0;
 cltd              { return OPCODE_CQD; }
 cqd               { return OPCODE_CQD; }
 cqo               { return OPCODE_CQO; }
+cltq              { return OPCODE_CQO; }
+cltd              { return OPCODE_CQO; }
+cwd               { return OPCODE_CQO; }
+cdq               { return OPCODE_CQO; }
 push              { return OPCODE_PUSH; }
 pushq             { return OPCODE_PUSH; }
 popw              { return OPCODE_POP; }
