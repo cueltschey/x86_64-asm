@@ -79,6 +79,7 @@ void assembler_init(asm_state_t *state) {
   state->text_state.current_text_offset = 0;
   state->text_state.instructions = (inst_t *)malloc(INIT_INSTRUCTION_COUNT);
   state->text_state.inst_capacity = INIT_INSTRUCTION_COUNT;
+  state->text_state.rodata_align = 4;
 
   state->text_idx = -1;
   state->note_idx = -1;

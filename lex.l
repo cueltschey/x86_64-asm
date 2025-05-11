@@ -211,6 +211,7 @@ leave             { return OPCODE_LEAVE; }
 ".bss"            { return TOK_SECTION_BSS; }
 ".note.GNU-stack" { return TOK_SECTION_GNUSTACK; }
 ".size"           { return TOK_SIZEDEF; }
+".align"          { return TOK_ALIGN; }
 
 ".string"         { return TOK_STRINGDEF; }
 ".globl"          { return TOK_GLOBLDEF; }

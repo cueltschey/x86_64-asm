@@ -4,6 +4,7 @@
 #include <elf.h>
 #include <stdlib.h>
 
+// update mov function
 // Fix parse operand
 // include imm registers
 // include deeper call stack

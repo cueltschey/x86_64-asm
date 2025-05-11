@@ -20,6 +20,7 @@ extern FILE *yyin;
 #define TOK_GLOBLDEF 311
 #define TOK_TYPEDEF 312
 #define TOK_SIZEDEF 313
+#define TOK_ALIGN 314
 
 #define TOK_SECTION_GNUSTACK 320
 

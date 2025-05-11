@@ -152,6 +152,8 @@ typedef struct text_state_s {
   size_t text_sec_idx;
 
   size_t local_function_idx;
+
+  Elf64_Xword rodata_align;
 } text_state_t;
 
 typedef struct asm_state_s {

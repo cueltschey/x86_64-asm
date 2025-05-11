@@ -279,6 +279,19 @@ bool handle_directive(text_state_t *state, line_info_t *info) {
     // Ignore, since we handle size elsewhere
     return true;
   }
+  case TOK_ALIGN: {
+    if (state->parse_mode != RODATA) {
+      ASM_ERROR("Got .align outside of .rodata");
+      return false;
+    }
+    if (info->nof_input_strings < 1) {
+      ASM_ERROR(".align requires value");
+      return false;
+    }
+    state->rodata_align = atoi(info->input_strings[0]);
+
+    return true;
+  }
 
   case TOK_TYPEDEF: {
     // TODO: handle types
@@ -358,7 +371,8 @@ bool handle_machine_code(text_state_t *state, line_info_t *info) {
   case OPCODE_IDIVQ:
     return opcode_mul(state, info);
   default:
-    ASM_WARN("Encountered unknown instruction: 0x%02x", info->tokens[0]);
+    ASM_WARN("Encountered unknown instruction on line %d: 0x%02x", line_num,
+             info->tokens[0]);
     break;
   }
   return true;
@@ -845,11 +859,6 @@ bool opcode_mov(text_state_t *state, line_info_t *info) {
 
   reg_disp = reg_minus ? -reg_disp : reg_disp;
   rm_disp = rm_minus ? -rm_disp : rm_disp;
-
-  if (reg_disp > 0 && rm_disp > 0) {
-    ASM_ERROR("mov failed: both operands have a displacement");
-    return false;
-  }
 
   int mod_bits;
   int displacement = rm_disp != 0 ? rm_disp : reg_disp;

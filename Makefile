@@ -49,8 +49,8 @@ test: $(TARGET)
 
 self: $(TARGET)
 	@for file in $(wildcard self_assemble/*.s); do \
-		echo "$(TARGET) $$file -o ${$$file%s}o"; \
-		./$(TARGET) "$$file" -o "${$$file%s}o"; \
+		echo "$(TARGET) $$file -o ${$$file%s}o -v"; \
+		./$(TARGET) "$$file" -o "${$$file%s}o" -v; \
 		if [ $$? -ne 0 ]; then \
 			break; \
 		fi; \

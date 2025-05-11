@@ -256,6 +256,8 @@ bool write_elf_object_file(asm_state_t *state) {
     current_section_name += strlen(state->sections[i].name) + 1;
   }
 
+  state->sections[state->rodata_idx].addralign = state->text_state.rodata_align;
+
   buffer_append(&state->sections[state->shstrtab_idx].content, "\0", 1);
 
   // Add strtab and symtab data
