@@ -370,6 +370,10 @@ bool handle_machine_code(text_state_t *state, line_info_t *info) {
   case OPCODE_DIVB:
   case OPCODE_IDIVQ:
     return opcode_mul(state, info);
+  case OPCODE_ADDB:
+  case OPCODE_ADDL:
+  case OPCODE_ADDQ:
+    return opcode_add(state, info);
   default:
     ASM_WARN("Encountered unknown instruction on line %d: 0x%02x", line_num,
              info->tokens[0]);
@@ -761,31 +765,95 @@ int get_rm_reg_bits_from_reg(int tok) {
   }
 }
 
-bool parse_mov_operand(int tokens[MAX_LINE_SIZE], size_t *tok_idx, int *reg,
-                       int *displacement, bool *minus, bool *reg_is_mem) {
-  *reg_is_mem = false;
-  if (tokens[(*tok_idx)] == TOK_MINUS) {
-    (*tok_idx)++;
-    *minus = true;
+bool unpack_operands(line_info_t *info, operand_info_t *res) {
+  res->reg_disp = -1;
+  res->rm_token = -1;
+  res->rm_disp = 0;
+  res->reg_disp = 0;
+  res->reg_is_mem = false;
+  size_t tok_idx = 1;
+  size_t string_idx = 0;
+  bool reg_disp_minus = false, rm_disp_minus = false;
+  if (info->nof_tokens < 3) {
+    ASM_ERROR("unpack operands failed: not enough tokens");
+    return false;
   }
-  if (tokens[(*tok_idx)] == TOK_NUM) {
-    *displacement = 8;
-    (*tok_idx)++;
-    *reg_is_mem = true;
-  }
-  if (tokens[(*tok_idx)] == TOK_OPENPAREN) {
-    *reg_is_mem = false;
-    (*tok_idx)++;
-    *reg = tokens[(*tok_idx)++];
-    if (tokens[(*tok_idx)++] != TOK_CLOSEPAREN) {
-      ASM_ERROR("expected )");
+
+  if (info->tokens[tok_idx] == TOK_MINUS) {
+    tok_idx++;
+    reg_disp_minus = true;
+    if (info->tokens[tok_idx] != TOK_NUM) {
+      ASM_ERROR("unpack operands failed: encountered - without number");
       return false;
     }
-    return true;
-  } else if (*reg_is_mem) {
-    return true;
   }
-  *reg = tokens[(*tok_idx)++];
+  if (info->tokens[tok_idx] == TOK_NUM) {
+    if (string_idx + 1 > info->nof_input_strings) {
+      ASM_ERROR("unpack_operands failed: not enough displacement values");
+      return false;
+    }
+    char *disp_val = info->input_strings[string_idx++];
+    if (disp_val[0] == '$')
+      disp_val++;
+    res->reg_disp = atoi(disp_val);
+    tok_idx++;
+
+    if (info->tokens[tok_idx] == TOK_OPENPAREN) {
+      tok_idx++;
+      res->reg_token = info->tokens[tok_idx++];
+      if (info->tokens[tok_idx++] != TOK_CLOSEPAREN) {
+        ASM_ERROR("unpack_operands failed: expected ) after register");
+        return false;
+      }
+    } else {
+      res->reg_is_mem = true;
+    }
+  } else {
+    res->reg_token = info->tokens[tok_idx++];
+  }
+
+  if (info->tokens[tok_idx] == TOK_MINUS) {
+    tok_idx++;
+    rm_disp_minus = true;
+    if (info->tokens[tok_idx] != TOK_NUM) {
+      ASM_ERROR("unpack operands failed: encountered - without number");
+      return false;
+    }
+  }
+  if (info->tokens[tok_idx] == TOK_NUM) {
+    if (string_idx + 1 > info->nof_input_strings) {
+      ASM_ERROR("unpack_operands failed: not enough displacement values");
+      return false;
+    }
+    char *disp_val = info->input_strings[string_idx++];
+    if (disp_val[0] == '$')
+      disp_val++;
+    res->rm_disp = atoi(disp_val);
+    tok_idx++;
+
+    if (info->tokens[tok_idx] == TOK_OPENPAREN) {
+      tok_idx++;
+      res->rm_token = info->tokens[tok_idx++];
+      if (info->tokens[tok_idx++] != TOK_CLOSEPAREN) {
+        ASM_ERROR("unpack_operands failed: expected ) after register");
+        return false;
+      }
+    } else {
+      res->reg_is_mem = true;
+    }
+  } else {
+    res->rm_token = info->tokens[tok_idx++];
+  }
+  if (reg_disp_minus)
+    res->reg_disp = res->reg_disp * -1;
+
+  if (rm_disp_minus)
+    res->rm_disp = res->rm_disp * -1;
+
+  ASM_DEBUG("Finished parsing operands on line %d:", line_num);
+  ASM_DEBUG("reg: %d(%d) | rm: %d(%d)", res->reg_disp, res->reg_token,
+            res->rm_disp, res->rm_token);
+
   return true;
 }
 
@@ -819,57 +887,25 @@ bool opcode_mov(text_state_t *state, line_info_t *info) {
     return false;
   }
 
-  size_t str_idx = 0;
   size_t machine_code_len = 0;
   uint8_t *machine_code = malloc(10);
-  int reg_token = -1, rm_token = -1;
-  bool reg_minus = false, rm_minus = false;
-  int reg_disp = 0, rm_disp = 0;
-  bool reg_is_mem = false, rm_is_mem = false;
 
-  size_t tok_idx = 1;
-  parse_mov_operand(info->tokens, &tok_idx, &reg_token, &reg_disp, &reg_minus,
-                    &reg_is_mem);
-  if (reg_disp == 8) {
-    if (str_idx >= info->nof_input_strings) {
-      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld",
-                str_idx, info->nof_input_strings);
-      return false;
-    }
-    char *disp_str = info->input_strings[str_idx++];
-    if (disp_str[0] == '$')
-      disp_str++;
-    int actual_displacement = atoi(disp_str);
-    reg_disp = actual_displacement;
+  operand_info_t *res = NULL;
+  res = malloc(sizeof(operand_info_t));
+  memset(res, 0, sizeof(operand_info_t));
+  if (!unpack_operands(info, res)) {
+    return false;
   }
-  parse_mov_operand(info->tokens, &tok_idx, &rm_token, &rm_disp, &rm_minus,
-                    &rm_is_mem);
-  if (rm_disp == 8) {
-    if (str_idx >= info->nof_input_strings) {
-      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld",
-                str_idx, info->nof_input_strings);
-      return false;
-    }
-    char *disp_str = info->input_strings[str_idx++];
-    if (disp_str[0] == '$')
-      disp_str++;
-    int actual_displacement = atoi(disp_str);
-    rm_disp = actual_displacement;
-  }
-
-  reg_disp = reg_minus ? -reg_disp : reg_disp;
-  rm_disp = rm_minus ? -rm_disp : rm_disp;
 
   int mod_bits;
-  int displacement = rm_disp != 0 ? rm_disp : reg_disp;
 
-  if (reg_is_mem) {
+  if (res->reg_is_mem) {
     // Handle immediate move
-    uint8_t register_byte = 0xb8 + get_rm_reg_bits_from_reg(rm_token);
+    uint8_t register_byte = 0xb8 + get_rm_reg_bits_from_reg(res->rm_token);
     machine_code[machine_code_len++] = register_byte;
-    if (is_token_64bit(rm_token)) {
+    if (is_token_64bit(res->rm_token)) {
       // TODO: add REX
-      uint64_t value = displacement;
+      uint64_t value = res->reg_disp;
       if (machine_code_len + sizeof(uint64_t) > 10) {
         ASM_ERROR("mov failed: not enough bytes!");
         return false;
@@ -883,38 +919,40 @@ bool opcode_mov(text_state_t *state, line_info_t *info) {
       ASM_ERROR("mov failed: not enough bytes!");
       return false;
     }
-    uint32_t value = displacement;
+    uint32_t value = res->reg_disp;
     memcpy(machine_code + machine_code_len, &value, sizeof(uint32_t));
     machine_code_len += sizeof(uint32_t);
     add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
     return true;
   }
 
-  if (displacement == 0)
+  int general_disp = res->reg_disp != 0 ? res->reg_disp : res->rm_disp;
+  if (general_disp == 0)
     mod_bits = 0b11;
-  else if (displacement >= -128 && displacement <= 127)
+  else if (general_disp >= -128 && general_disp <= 127)
     mod_bits = 0b01;
   else
     mod_bits = 0b10;
 
-  int reg_bits = get_rm_reg_bits_from_reg(reg_token);
-  int rm_bits = get_rm_reg_bits_from_reg(rm_token);
+  int reg_bits = get_rm_reg_bits_from_reg(res->reg_token);
+  int rm_bits = get_rm_reg_bits_from_reg(res->rm_token);
   if (reg_bits < 0 || rm_bits < 0) {
     ASM_ERROR("mov failed: could not get reg or rm bits from register");
     return false;
   }
 
-  add_rex_if_required(reg_token, rm_token, machine_code, &machine_code_len);
+  add_rex_if_required(res->reg_token, res->rm_token, machine_code,
+                      &machine_code_len);
 
   // Add opcode
-  if (reg_disp != 0)
+  if (res->reg_disp != 0)
     machine_code[machine_code_len++] = 0x8b;
   else
     machine_code[machine_code_len++] = 0x89;
 
   // Add Mod R/M byte
   uint8_t modrm_byte = 0;
-  if (reg_disp != 0)
+  if (res->reg_disp != 0)
     modrm_byte = ((mod_bits & 0b11) << 6) | ((rm_bits & 0b111) << 3) |
                  (reg_bits & 0b111);
   else
@@ -923,8 +961,12 @@ bool opcode_mov(text_state_t *state, line_info_t *info) {
   machine_code[machine_code_len++] = modrm_byte;
 
   // Add displacement if any
-  if (displacement != 0) {
-    machine_code[machine_code_len++] = displacement;
+  if (res->reg_disp != 0) {
+    machine_code[machine_code_len++] = res->reg_disp;
+  }
+
+  if (res->rm_disp != 0) {
+    machine_code[machine_code_len++] = res->rm_disp;
   }
 
   add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
@@ -937,59 +979,26 @@ bool opcode_sub(text_state_t *state, line_info_t *info) {
     return false;
   }
 
-  size_t str_idx = 0;
-  int reg_token = -1, rm_token = -1;
-  bool reg_minus = false, rm_minus = false;
-  int reg_disp = 0, rm_disp = 0;
-  bool reg_is_mem = false, rm_is_mem = false;
-
-  size_t tok_idx = 1;
-  parse_mov_operand(info->tokens, &tok_idx, &reg_token, &reg_disp, &reg_minus,
-                    &reg_is_mem);
-  if (reg_disp == 8) {
-    if (str_idx >= info->nof_input_strings) {
-      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld",
-                str_idx, info->nof_input_strings);
-      return false;
-    }
-    char *disp_str = info->input_strings[str_idx++];
-    if (disp_str[0] == '$')
-      disp_str++;
-    int actual_displacement = atoi(disp_str);
-    reg_disp = actual_displacement;
+  operand_info_t *res = NULL;
+  res = malloc(sizeof(operand_info_t));
+  memset(res, 0, sizeof(operand_info_t));
+  if (!unpack_operands(info, res)) {
+    return false;
   }
-  parse_mov_operand(info->tokens, &tok_idx, &rm_token, &rm_disp, &rm_minus,
-                    &rm_is_mem);
-  if (rm_disp == 8) {
-    if (str_idx >= info->nof_input_strings) {
-      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld",
-                str_idx, info->nof_input_strings);
-      return false;
-    }
-    char *disp_str = info->input_strings[str_idx++];
-    if (disp_str[0] == '$')
-      disp_str++;
-    int actual_displacement = atoi(disp_str);
-    rm_disp = actual_displacement;
-  }
-
-  reg_disp = reg_minus ? -reg_disp : reg_disp;
-  rm_disp = rm_minus ? -rm_disp : rm_disp;
-  int displacement = rm_disp != 0 ? rm_disp : reg_disp;
 
   uint8_t *machine_code = malloc(12);
   size_t machine_code_len = 0;
 
-  if (reg_is_mem) {
+  if (res->reg_is_mem) {
     uint8_t opcode_byte = 0x81;
     uint8_t modrm_byte =
-        (0b11 << 6) | (0b101 << 3) | get_rm_reg_bits_from_reg(rm_token);
-    if (is_token_64bit(rm_token)) {
+        (0b11 << 6) | (0b101 << 3) | get_rm_reg_bits_from_reg(res->rm_token);
+    if (is_token_64bit(res->rm_token)) {
       uint8_t rex_prefix = REX_PREFIX_BASE | REX_PREFIX_W;
       machine_code[machine_code_len++] = rex_prefix;
-      uint64_t value_byte = displacement;
-      if (displacement <= 128 && displacement >= 0) {
-        uint8_t value_byte = displacement;
+      uint64_t value_byte = res->reg_disp;
+      if (res->reg_disp <= 128 && res->reg_disp >= 0) {
+        uint8_t value_byte = res->reg_disp;
         opcode_byte = 0x83;
         machine_code[machine_code_len++] = opcode_byte;
         machine_code[machine_code_len++] = modrm_byte;
@@ -1000,20 +1009,20 @@ bool opcode_sub(text_state_t *state, line_info_t *info) {
         memcpy(machine_code + machine_code_len, &value_byte, sizeof(uint64_t));
         machine_code_len += sizeof(uint64_t);
       }
-    } else if (is_token_32bit(rm_token)) {
-      uint32_t value_byte = displacement;
+    } else if (is_token_32bit(res->rm_token)) {
+      uint32_t value_byte = res->reg_disp;
       machine_code[machine_code_len++] = opcode_byte;
       machine_code[machine_code_len++] = modrm_byte;
       memcpy(machine_code + machine_code_len, &value_byte, sizeof(uint32_t));
       machine_code_len += sizeof(uint32_t);
-    } else if (is_token_16bit(rm_token)) {
-      uint16_t value_byte = displacement;
+    } else if (is_token_16bit(res->reg_disp)) {
+      uint16_t value_byte = res->reg_disp;
       machine_code[machine_code_len++] = opcode_byte;
       machine_code[machine_code_len++] = modrm_byte;
       memcpy(machine_code + machine_code_len, &value_byte, sizeof(uint16_t));
       machine_code_len += sizeof(uint16_t);
     } else {
-      uint8_t value_byte = displacement;
+      uint8_t value_byte = res->reg_disp;
       machine_code[machine_code_len++] = opcode_byte;
       machine_code[machine_code_len++] = modrm_byte;
       machine_code[machine_code_len++] = value_byte;
@@ -1030,57 +1039,24 @@ bool opcode_cmp(text_state_t *state, line_info_t *info) {
     return false;
   }
 
-  size_t str_idx = 0;
-  int reg_token = -1, rm_token = -1;
-  bool reg_minus = false, rm_minus = false;
-  int reg_disp = 0, rm_disp = 0;
-  bool reg_is_mem = false, rm_is_mem = false;
-
-  size_t tok_idx = 1;
-  parse_mov_operand(info->tokens, &tok_idx, &reg_token, &reg_disp, &reg_minus,
-                    &reg_is_mem);
-  if (reg_disp == 8) {
-    if (str_idx >= info->nof_input_strings) {
-      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld",
-                str_idx, info->nof_input_strings);
-      return false;
-    }
-    char *disp_str = info->input_strings[str_idx++];
-    if (disp_str[0] == '$')
-      disp_str++;
-    int actual_displacement = atoi(disp_str);
-    reg_disp = actual_displacement;
+  operand_info_t *res = NULL;
+  res = malloc(sizeof(operand_info_t));
+  memset(res, 0, sizeof(operand_info_t));
+  if (!unpack_operands(info, res)) {
+    return false;
   }
-  parse_mov_operand(info->tokens, &tok_idx, &rm_token, &rm_disp, &rm_minus,
-                    &rm_is_mem);
-  if (rm_disp == 8) {
-    if (str_idx >= info->nof_input_strings) {
-      ASM_ERROR("mov failed: not enough input strings, needed %ld got %ld",
-                str_idx, info->nof_input_strings);
-      return false;
-    }
-    char *disp_str = info->input_strings[str_idx++];
-    if (disp_str[0] == '$')
-      disp_str++;
-    int actual_displacement = atoi(disp_str);
-    rm_disp = actual_displacement;
-  }
-
-  reg_disp = reg_minus ? -reg_disp : reg_disp;
-  rm_disp = rm_minus ? -rm_disp : rm_disp;
-  int displacement = rm_disp != 0 ? rm_disp : reg_disp;
 
   uint8_t *machine_code = malloc(12);
   size_t machine_code_len = 0;
 
-  if (reg_is_mem) {
+  if (res->reg_is_mem) {
     uint8_t opcode_byte = 0x81;
     uint8_t modrm_byte =
-        (0b01 << 6) | (0b111 << 3) | get_rm_reg_bits_from_reg(rm_token);
-    if (is_token_64bit(rm_token)) {
-      uint64_t value_byte = displacement;
-      if (displacement >= -127 && displacement <= 128) {
-        uint8_t single_byte_disp = displacement & 0xff;
+        (0b01 << 6) | (0b111 << 3) | get_rm_reg_bits_from_reg(res->rm_token);
+    if (is_token_64bit(res->rm_token)) {
+      uint64_t value_byte = res->reg_disp;
+      if (res->rm_disp >= -127 && res->rm_disp <= 128) {
+        uint8_t single_byte_disp = res->rm_disp & 0xff;
         opcode_byte = 0x80;
         machine_code[machine_code_len++] = opcode_byte;
         machine_code[machine_code_len++] = modrm_byte;
@@ -1091,35 +1067,36 @@ bool opcode_cmp(text_state_t *state, line_info_t *info) {
         memcpy(machine_code + machine_code_len, &value_byte, sizeof(uint64_t));
         machine_code_len += sizeof(uint64_t);
       }
-    } else if (is_token_32bit(rm_token)) {
-      uint32_t value_byte = displacement;
+    } else if (is_token_32bit(res->rm_token)) {
+      uint32_t value_byte = res->reg_disp;
       machine_code[machine_code_len++] = opcode_byte;
       machine_code[machine_code_len++] = modrm_byte;
       memcpy(machine_code + machine_code_len, &value_byte, sizeof(uint32_t));
       machine_code_len += sizeof(uint32_t);
-    } else if (is_token_16bit(rm_token)) {
-      uint16_t value_byte = displacement;
+    } else if (is_token_16bit(res->rm_token)) {
+      uint16_t value_byte = res->reg_disp;
       machine_code[machine_code_len++] = opcode_byte;
       machine_code[machine_code_len++] = modrm_byte;
       memcpy(machine_code + machine_code_len, &value_byte, sizeof(uint16_t));
       machine_code_len += sizeof(uint16_t);
     } else {
-      uint8_t value_byte = displacement;
+      uint8_t value_byte = res->reg_disp;
       machine_code[machine_code_len++] = opcode_byte;
       machine_code[machine_code_len++] = modrm_byte;
       machine_code[machine_code_len++] = value_byte;
     }
 
     // add the mem val
-    machine_code[machine_code_len++] = reg_disp & 0xff;
+    machine_code[machine_code_len++] = res->reg_disp & 0xff;
     add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
     return true;
   }
-  add_rex_if_required(reg_token, rm_token, machine_code, &machine_code_len);
+  add_rex_if_required(res->reg_token, res->rm_token, machine_code,
+                      &machine_code_len);
   uint8_t opcode_byte = 0x3b;
-  uint8_t modrm_byte = (0b11 << 6) |
-                       ((get_rm_reg_bits_from_reg(reg_token) & 0xff) << 3) |
-                       (get_rm_reg_bits_from_reg(rm_token) & 0xff);
+  uint8_t modrm_byte =
+      (0b11 << 6) | ((get_rm_reg_bits_from_reg(res->reg_token) & 0xff) << 3) |
+      (get_rm_reg_bits_from_reg(res->rm_token) & 0xff);
   machine_code[machine_code_len++] = opcode_byte;
   machine_code[machine_code_len++] = modrm_byte;
 
@@ -1417,29 +1394,56 @@ bool opcode_mul(text_state_t *state, line_info_t *info) {
   size_t machine_code_len = 0;
   // get opcode
   machine_code[machine_code_len++] = info->tokens[0] & 0xff;
+  operand_info_t *res = NULL;
+  res = malloc(sizeof(operand_info_t));
+  memset(res, 0, sizeof(operand_info_t));
+
   size_t tok_idx = 1;
-  int rm_token = 0;
-  int rm_disp = 0;
-  bool minus = false;
-  bool rm_is_mem = false;
-  parse_mov_operand(info->tokens, &tok_idx, &rm_token, &rm_disp, &minus,
-                    &rm_is_mem);
-  if (rm_disp == 8) {
-    char *disp_str = info->input_strings[1];
-    if (disp_str[0] == '$')
-      disp_str++;
-    int actual_displacement = atoi(disp_str);
-    rm_disp = actual_displacement;
+  bool rm_disp_minus = false;
+  if (info->tokens[tok_idx] == TOK_MINUS) {
+    tok_idx++;
+    rm_disp_minus = true;
+    if (info->tokens[tok_idx] != TOK_NUM) {
+      ASM_ERROR("opcode_mul failed: encountered - without number");
+      return false;
+    }
   }
-  rm_disp = minus ? -rm_disp : rm_disp;
+  if (info->tokens[tok_idx] == TOK_NUM) {
+    if (info->nof_input_strings < 2) {
+      ASM_ERROR("opcode_mul failed: not enough displacement values");
+      return false;
+    }
+    char *disp_val = info->input_strings[1];
+    if (disp_val[0] == '$')
+      disp_val++;
+    res->rm_disp = atoi(disp_val);
+    tok_idx++;
+
+    if (info->tokens[tok_idx] == TOK_OPENPAREN) {
+      tok_idx++;
+      res->rm_token = info->tokens[tok_idx++];
+      if (info->tokens[tok_idx++] != TOK_CLOSEPAREN) {
+        ASM_ERROR("unpack_operands failed: expected ) after register");
+        return false;
+      }
+    } else {
+      res->reg_is_mem = true;
+    }
+  } else {
+    res->rm_token = info->tokens[tok_idx++];
+  }
+  if (rm_disp_minus)
+    res->rm_disp = res->rm_disp * -1;
+
   uint8_t modrm_byte = 0;
   uint8_t mod_bits = 0, reg_bits = 0,
-          rm_bits = get_rm_reg_bits_from_reg(rm_token);
+          rm_bits = get_rm_reg_bits_from_reg(res->rm_token);
   // TODO: handle imulw and the like
+  //
 
-  if (rm_disp == 0) {
+  if (res->rm_disp == 0) {
     mod_bits = 0b11;
-  } else if (rm_disp >= -127 && rm_disp <= 128) {
+  } else if (res->rm_disp >= -127 && res->rm_disp <= 128) {
     mod_bits = 0b01;
   } else {
     mod_bits = 0b10;
@@ -1464,16 +1468,56 @@ bool opcode_mul(text_state_t *state, line_info_t *info) {
   modrm_byte = (mod_bits << 6) | (reg_bits << 3) | rm_bits;
   machine_code[machine_code_len++] = modrm_byte;
 
-  if (rm_disp != 0) {
-    ASM_DEBUG("RM DISP: %d", rm_disp);
+  if (res->rm_disp != 0) {
+    ASM_DEBUG("RM DISP: %d", res->rm_disp);
     if (mod_bits == 0b01) {
-      machine_code[machine_code_len++] = rm_disp & 0xff;
+      machine_code[machine_code_len++] = res->rm_disp & 0xff;
     } else {
-      int32_t disp_val = rm_disp;
+      int32_t disp_val = res->rm_disp;
       memcpy(machine_code + machine_code_len, &disp_val, sizeof(int32_t));
       machine_code_len += sizeof(int32_t);
     }
   }
+
+  add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
+
+  return true;
+}
+
+bool opcode_add(text_state_t *state, line_info_t *info) {
+  if (info->nof_tokens < 3) {
+    ASM_ERROR("add requires 2 operands");
+    return false;
+  }
+  uint8_t *machine_code = malloc(10);
+  size_t machine_code_len = 0;
+
+  // get opcode
+  operand_info_t *res = NULL;
+  res = malloc(sizeof(operand_info_t));
+  memset(res, 0, sizeof(operand_info_t));
+  if (!unpack_operands(info, res)) {
+    return false;
+  }
+
+  add_rex_if_required(res->reg_token, res->rm_token, machine_code,
+                      &machine_code_len);
+
+  machine_code[machine_code_len++] = info->tokens[0] & 0xff;
+
+  int gen_disp = res->reg_disp != 0 ? res->reg_disp : res->rm_disp;
+  uint8_t mod_bits = 0;
+  if (gen_disp == 0) {
+    mod_bits = 0b11;
+  } else if (gen_disp >= -127 && gen_disp <= 128) {
+    mod_bits = 0b01;
+  } else {
+    mod_bits = 0b10;
+  }
+  uint8_t modrm_byte = (mod_bits << 6) |
+                       (get_rm_reg_bits_from_reg(res->rm_token) << 3) |
+                       get_rm_reg_bits_from_reg(res->reg_token);
+  machine_code[machine_code_len++] = modrm_byte;
 
   add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
 

@@ -45,7 +45,8 @@ test: $(TARGET)
 		if [ $$? -ne 0 ]; then \
 			break; \
 		fi; \
-	done
+	done; \
+	rm test_exec
 
 self: $(TARGET)
 	@for file in $(wildcard self_assemble/*.s); do \

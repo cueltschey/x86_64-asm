@@ -7,6 +7,14 @@
 #define REX_PREFIX_X 0x02
 #define REX_PREFIX_B 0x01
 
+typedef struct operand_info_s {
+  int reg_token;
+  int rm_token;
+  int rm_disp;
+  int reg_disp;
+  bool reg_is_mem;
+} operand_info_t;
+
 bool add_new_inst(text_state_t *state, uint8_t *machine_code,
                   size_t machine_code_len, inst_status_t status,
                   rela_info_t *rela, void *extra);
@@ -41,6 +49,8 @@ bool opcode_lea(text_state_t *state, line_info_t *info);
 bool opcode_jmp(text_state_t *state, line_info_t *info);
 
 bool opcode_mul(text_state_t *state, line_info_t *info);
+
+bool opcode_add(text_state_t *state, line_info_t *info);
 
 bool opcode_leave(text_state_t *state);
 
