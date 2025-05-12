@@ -12,6 +12,8 @@ typedef struct operand_info_s {
   int rm_token;
   int rm_disp;
   int reg_disp;
+  bool reg_is_imm;
+  bool rm_is_mem;
   bool reg_is_mem;
 } operand_info_t;
 

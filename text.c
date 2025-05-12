@@ -24,6 +24,19 @@ bool add_new_inst(text_state_t *state, uint8_t *machine_code,
   return true;
 }
 
+uint8_t get_mod_bits(operand_info_t *res) {
+  int largest_disp = res->rm_disp != 0 ? res->rm_disp : res->reg_disp;
+
+  if (largest_disp == 0) {
+    return 0b11;
+  }
+  if (largest_disp <= 127 && largest_disp >= -128) {
+    return 0b01;
+  }
+
+  return 0b10;
+}
+
 bool apply_text_shift(text_state_t *state, size_t instruction_start,
                       size_t shift_by) {
   jmp_extra_t *extra = state->instructions[instruction_start].extra;
@@ -331,6 +344,7 @@ bool handle_machine_code(text_state_t *state, line_info_t *info) {
   switch (info->tokens[0]) {
   case OPCODE_MOV:
   case OPCODE_MOVB:
+  case OPCODE_MOVZ:
     return opcode_mov(state, info);
   case OPCODE_SUBB:
   case OPCODE_SUBL:
@@ -354,6 +368,8 @@ bool handle_machine_code(text_state_t *state, line_info_t *info) {
   case OPCODE_JGE:
   case OPCODE_JL:
   case OPCODE_JLE:
+  case OPCODE_JNS:
+  case OPCODE_JS:
     return opcode_jmp(state, info);
   case OPCODE_CMPQ:
   case OPCODE_CMPL:
@@ -771,6 +787,8 @@ bool unpack_operands(line_info_t *info, operand_info_t *res) {
   res->rm_disp = 0;
   res->reg_disp = 0;
   res->reg_is_mem = false;
+  res->rm_is_mem = false;
+  res->reg_is_imm = false;
   size_t tok_idx = 1;
   size_t string_idx = 0;
   bool reg_disp_minus = false, rm_disp_minus = false;
@@ -805,8 +823,9 @@ bool unpack_operands(line_info_t *info, operand_info_t *res) {
         ASM_ERROR("unpack_operands failed: expected ) after register");
         return false;
       }
-    } else {
       res->reg_is_mem = true;
+    } else {
+      res->reg_is_imm = true;
     }
   } else {
     res->reg_token = info->tokens[tok_idx++];
@@ -838,8 +857,10 @@ bool unpack_operands(line_info_t *info, operand_info_t *res) {
         ASM_ERROR("unpack_operands failed: expected ) after register");
         return false;
       }
+      res->rm_is_mem = true;
     } else {
-      res->reg_is_mem = true;
+      ASM_ERROR("Imm in second operand is not allowed");
+      return false;
     }
   } else {
     res->rm_token = info->tokens[tok_idx++];
@@ -897,14 +918,41 @@ bool opcode_mov(text_state_t *state, line_info_t *info) {
     return false;
   }
 
-  int mod_bits;
+  add_rex_if_required(res->reg_token, res->rm_token, machine_code,
+                      &machine_code_len);
 
-  if (res->reg_is_mem) {
+  if (res->reg_is_imm) {
+    if (res->rm_is_mem) {
+      machine_code[machine_code_len++] = 0xc7;
+      uint8_t mod_bits = get_mod_bits(res);
+      machine_code[machine_code_len++] =
+          (mod_bits << 6) | (0b000 << 3) |
+          get_rm_reg_bits_from_reg(res->rm_token);
+      switch (mod_bits) {
+      case 0b01:
+        machine_code[machine_code_len++] = res->rm_disp & 0xff;
+        break;
+      case 0b10: {
+        uint32_t value = res->rm_disp;
+        memcpy(machine_code + machine_code_len, &value, sizeof(uint32_t));
+        machine_code_len += sizeof(uint32_t);
+        break;
+      }
+      default:
+        ASM_ERROR("Got unexpected mod bits in mov r/m64 imm");
+        return false;
+      }
+      uint32_t imm_value = res->reg_disp;
+      memcpy(machine_code + machine_code_len, &imm_value, sizeof(uint32_t));
+      machine_code_len += sizeof(uint32_t);
+
+      add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
+      return true;
+    }
     // Handle immediate move
     uint8_t register_byte = 0xb8 + get_rm_reg_bits_from_reg(res->rm_token);
     machine_code[machine_code_len++] = register_byte;
     if (is_token_64bit(res->rm_token)) {
-      // TODO: add REX
       uint64_t value = res->reg_disp;
       if (machine_code_len + sizeof(uint64_t) > 10) {
         ASM_ERROR("mov failed: not enough bytes!");
@@ -926,13 +974,7 @@ bool opcode_mov(text_state_t *state, line_info_t *info) {
     return true;
   }
 
-  int general_disp = res->reg_disp != 0 ? res->reg_disp : res->rm_disp;
-  if (general_disp == 0)
-    mod_bits = 0b11;
-  else if (general_disp >= -128 && general_disp <= 127)
-    mod_bits = 0b01;
-  else
-    mod_bits = 0b10;
+  int mod_bits = get_mod_bits(res);
 
   int reg_bits = get_rm_reg_bits_from_reg(res->reg_token);
   int rm_bits = get_rm_reg_bits_from_reg(res->rm_token);
@@ -941,14 +983,16 @@ bool opcode_mov(text_state_t *state, line_info_t *info) {
     return false;
   }
 
-  add_rex_if_required(res->reg_token, res->rm_token, machine_code,
-                      &machine_code_len);
-
   // Add opcode
-  if (res->reg_disp != 0)
-    machine_code[machine_code_len++] = 0x8b;
-  else
-    machine_code[machine_code_len++] = 0x89;
+  if (info->tokens[0] == OPCODE_MOVZ) {
+    machine_code[machine_code_len++] = 0x0f;
+    machine_code[machine_code_len++] = 0xb6;
+  } else {
+    if (res->reg_disp != 0)
+      machine_code[machine_code_len++] = 0x8b;
+    else
+      machine_code[machine_code_len++] = info->tokens[0];
+  }
 
   // Add Mod R/M byte
   uint8_t modrm_byte = 0;
@@ -961,7 +1005,7 @@ bool opcode_mov(text_state_t *state, line_info_t *info) {
   machine_code[machine_code_len++] = modrm_byte;
 
   // Add displacement if any
-  if (res->reg_disp != 0) {
+  if (res->reg_disp != 0 || info->tokens[0] == OPCODE_MOVZ) {
     machine_code[machine_code_len++] = res->reg_disp;
   }
 
@@ -989,7 +1033,7 @@ bool opcode_sub(text_state_t *state, line_info_t *info) {
   uint8_t *machine_code = malloc(12);
   size_t machine_code_len = 0;
 
-  if (res->reg_is_mem) {
+  if (res->reg_is_imm) {
     uint8_t opcode_byte = 0x81;
     uint8_t modrm_byte =
         (0b11 << 6) | (0b101 << 3) | get_rm_reg_bits_from_reg(res->rm_token);
@@ -1049,7 +1093,13 @@ bool opcode_cmp(text_state_t *state, line_info_t *info) {
   uint8_t *machine_code = malloc(12);
   size_t machine_code_len = 0;
 
-  if (res->reg_is_mem) {
+  if (res->reg_is_imm) {
+    if (res->rm_token == TOK_REG_AL) {
+      machine_code[machine_code_len++] = 0x3c;
+      machine_code[machine_code_len++] = res->reg_disp & 0xff;
+      add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
+      return true;
+    }
     uint8_t opcode_byte = 0x81;
     uint8_t modrm_byte =
         (0b01 << 6) | (0b111 << 3) | get_rm_reg_bits_from_reg(res->rm_token);
@@ -1057,7 +1107,7 @@ bool opcode_cmp(text_state_t *state, line_info_t *info) {
       uint64_t value_byte = res->reg_disp;
       if (res->rm_disp >= -127 && res->rm_disp <= 128) {
         uint8_t single_byte_disp = res->rm_disp & 0xff;
-        opcode_byte = 0x80;
+        opcode_byte = 0x83;
         machine_code[machine_code_len++] = opcode_byte;
         machine_code[machine_code_len++] = modrm_byte;
         machine_code[machine_code_len++] = single_byte_disp;
@@ -1427,7 +1477,7 @@ bool opcode_mul(text_state_t *state, line_info_t *info) {
         return false;
       }
     } else {
-      res->reg_is_mem = true;
+      res->reg_is_imm = true;
     }
   } else {
     res->rm_token = info->tokens[tok_idx++];
@@ -1436,18 +1486,10 @@ bool opcode_mul(text_state_t *state, line_info_t *info) {
     res->rm_disp = res->rm_disp * -1;
 
   uint8_t modrm_byte = 0;
-  uint8_t mod_bits = 0, reg_bits = 0,
-          rm_bits = get_rm_reg_bits_from_reg(res->rm_token);
+  uint8_t mod_bits = get_mod_bits(res);
+  uint8_t reg_bits = 0, rm_bits = get_rm_reg_bits_from_reg(res->rm_token);
   // TODO: handle imulw and the like
   //
-
-  if (res->rm_disp == 0) {
-    mod_bits = 0b11;
-  } else if (res->rm_disp >= -127 && res->rm_disp <= 128) {
-    mod_bits = 0b01;
-  } else {
-    mod_bits = 0b10;
-  }
 
   if (memcmp(info->input_strings[0], "test", 4) == 0) {
     reg_bits = 0b000;
@@ -1503,17 +1545,61 @@ bool opcode_add(text_state_t *state, line_info_t *info) {
   add_rex_if_required(res->reg_token, res->rm_token, machine_code,
                       &machine_code_len);
 
+  if (res->reg_is_imm) {
+    if (res->rm_is_mem) {
+      uint8_t opcode_byte;
+      if (res->reg_disp >= -128 && res->reg_disp <= 127) {
+        opcode_byte = 0x83;
+      } else {
+        opcode_byte = 0x81;
+      }
+      machine_code[machine_code_len++] = opcode_byte;
+      uint8_t mod_bits = get_mod_bits(res);
+      uint8_t modrm_byte = (mod_bits << 6) | (0b000 << 3) |
+                           get_rm_reg_bits_from_reg(res->rm_token);
+      machine_code[machine_code_len++] = modrm_byte;
+
+      switch (mod_bits) {
+      case 0b01:
+        machine_code[machine_code_len++] = res->rm_disp & 0xff;
+        break;
+
+      case 0b10: {
+        uint32_t disp_val = res->rm_disp;
+        memcpy(machine_code + machine_code_len, &disp_val, sizeof(uint32_t));
+        machine_code_len += sizeof(uint32_t);
+        break;
+      }
+      default:
+        ASM_ERROR("encountered unexpected mod bits in mov r/m64 imm");
+        return false;
+      }
+      switch (opcode_byte) {
+      case 0x83:
+        machine_code[machine_code_len++] = res->reg_disp & 0xff;
+        break;
+
+      case 0x81: {
+        uint32_t imm_val = res->reg_disp;
+        memcpy(machine_code + machine_code_len, &imm_val, sizeof(uint32_t));
+        machine_code_len += sizeof(uint32_t);
+        break;
+      }
+      default:
+        ASM_ERROR("encountered unexpected opcode in mov r/m64 imm");
+        return false;
+      }
+      add_new_inst(state, machine_code, machine_code_len, COMPLETE, NULL, NULL);
+      return true;
+    }
+    // TODO: implement
+    ASM_ERROR("add from imm to reg is not implemented");
+    return false;
+  }
+
   machine_code[machine_code_len++] = info->tokens[0] & 0xff;
 
-  int gen_disp = res->reg_disp != 0 ? res->reg_disp : res->rm_disp;
-  uint8_t mod_bits = 0;
-  if (gen_disp == 0) {
-    mod_bits = 0b11;
-  } else if (gen_disp >= -127 && gen_disp <= 128) {
-    mod_bits = 0b01;
-  } else {
-    mod_bits = 0b10;
-  }
+  uint8_t mod_bits = get_mod_bits(res);
   uint8_t modrm_byte = (mod_bits << 6) |
                        (get_rm_reg_bits_from_reg(res->rm_token) << 3) |
                        get_rm_reg_bits_from_reg(res->reg_token);

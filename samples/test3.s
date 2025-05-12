@@ -1,10 +1,8 @@
-	.file	"if.c"
+	.file	"test3.c"
 	.text
 	.section	.rodata
 .LC0:
-	.string	"Yes!"
-.LC1:
-	.string	"Not today"
+	.string	"Count: %d\n"
 	.text
 	.globl	main
 	.type	main, @function
@@ -16,29 +14,26 @@ main:
 	.cfi_offset 6, -16
 	movq	%rsp, %rbp
 	.cfi_def_cfa_register 6
-	subq	$32, %rsp
-	movl	%edi, -20(%rbp)
-	movq	%rsi, -32(%rbp)
-	call	getchar@PLT
-	movb	%al, -1(%rbp)
-	cmpb	$121, -1(%rbp)
-	jne	.L2
-	leaq	.LC0(%rip), %rax
-	movq	%rax, %rdi
-	call	puts@PLT
-	movl	$0, %eax
-	jmp	.L3
-.L2:
-	leaq	.LC1(%rip), %rax
-	movq	%rax, %rdi
-	call	puts@PLT
-	movl	$0, %eax
+	subq	$16, %rsp
+	movl	$0, -4(%rbp)
+	jmp	.L2
 .L3:
+	movl	-4(%rbp), %eax
+	leaq	.LC0(%rip), %rdx
+	movl	%eax, %esi
+	movq	%rdx, %rdi
+	movl	$0, %eax
+	call	printf@PLT
+	addl	$1, -4(%rbp)
+.L2:
+	cmpl	$4, -4(%rbp)
+	jle	.L3
+	movl	$0, %eax
 	leave
 	.cfi_def_cfa 7, 8
 	ret
 	.cfi_endproc
 .LFE0:
 	.size	main, .-main
-	.ident	"GCC: (GNU) 14.2.1 20250207"
+	.ident	"GCC: (GNU) 15.1.1 20250425"
 	.section	.note.GNU-stack,"",@progbits

@@ -119,10 +119,13 @@ jg                { return OPCODE_JG; }
 jge               { return OPCODE_JGE; }
 jl                { return OPCODE_JL; }
 jle               { return OPCODE_JLE; }
+jns               { return OPCODE_JNS; }
+js                { return OPCODE_JS; }
 movq              { return OPCODE_MOV; }
 movl              { return OPCODE_MOV; }
 movw              { return OPCODE_MOV; }
 movb              { return OPCODE_MOVB; }
+movzbl            { return OPCODE_MOVZ; }
 leaq              { return OPCODE_LEAQ; }
 leal              { return OPCODE_LEAL; }
 leaw              { return OPCODE_LEAW; }
@@ -235,6 +238,7 @@ leave             { return OPCODE_LEAVE; }
 
 
 "-"               { return TOK_MINUS; }
+"$-"              { return TOK_MINUS; }
 "("               { return TOK_OPENPAREN; }
 ")"               { return TOK_CLOSEPAREN; }
 \"[^\"]*\"        { return TOK_STRLIT; }
