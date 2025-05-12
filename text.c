@@ -817,17 +817,19 @@ bool unpack_operands(line_info_t *info, operand_info_t *res) {
     tok_idx++;
 
     if (info->tokens[tok_idx] == TOK_OPENPAREN) {
-      tok_idx++;
-      res->reg_token = info->tokens[tok_idx++];
-      if (info->tokens[tok_idx++] != TOK_CLOSEPAREN) {
-        ASM_ERROR("unpack_operands failed: expected ) after register");
-        return false;
-      }
       res->reg_is_mem = true;
     } else {
       res->reg_is_imm = true;
     }
-  } else {
+  }
+  if (info->tokens[tok_idx] == TOK_OPENPAREN) {
+    tok_idx++;
+    res->reg_token = info->tokens[tok_idx++];
+    if (info->tokens[tok_idx++] != TOK_CLOSEPAREN) {
+      ASM_ERROR("unpack_operands failed: expected ) after register");
+      return false;
+    }
+  } else if (!res->reg_is_imm) {
     res->reg_token = info->tokens[tok_idx++];
   }
 
@@ -851,20 +853,23 @@ bool unpack_operands(line_info_t *info, operand_info_t *res) {
     tok_idx++;
 
     if (info->tokens[tok_idx] == TOK_OPENPAREN) {
-      tok_idx++;
-      res->rm_token = info->tokens[tok_idx++];
-      if (info->tokens[tok_idx++] != TOK_CLOSEPAREN) {
-        ASM_ERROR("unpack_operands failed: expected ) after register");
-        return false;
-      }
       res->rm_is_mem = true;
     } else {
       ASM_ERROR("Imm in second operand is not allowed");
       return false;
     }
+  }
+  if (info->tokens[tok_idx] == TOK_OPENPAREN) {
+    tok_idx++;
+    res->rm_token = info->tokens[tok_idx++];
+    if (info->tokens[tok_idx++] != TOK_CLOSEPAREN) {
+      ASM_ERROR("unpack_operands failed: expected ) after register");
+      return false;
+    }
   } else {
     res->rm_token = info->tokens[tok_idx++];
   }
+
   if (reg_disp_minus)
     res->reg_disp = res->reg_disp * -1;
 
