@@ -169,6 +169,7 @@ bool handle_label(text_state_t *state, line_info_t *info) {
     }
     // .LFB[0-9]
     if (label_tok == TOK_FUNC_START) {
+      ASM_ERROR("WE GOT A START %s", info->input_strings[0]);
       size_t file_defined_idx = 0;
       for (size_t i = 0; i < state->nof_functions; i++) {
         if (state->functions[i].defined_in_file) {

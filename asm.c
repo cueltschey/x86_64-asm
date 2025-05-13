@@ -216,21 +216,35 @@ bool assemble_file(const char *input_file, const char *output_file) {
 
   line_num = 0;
   bool ret = true;
+  line_info_t **preprocessed_lines = malloc(10 * sizeof(line_info_t *));
+  size_t nof_preprocessed = 0;
+  size_t preprocessed_capacity = 10;
 
   int current_token;
-  line_info_t current_info;
-  current_info.nof_input_strings = 0;
-  current_info.nof_tokens = 0;
+  line_info_t *current_info = malloc(sizeof(line_info_t));
+  memset(current_info, 0, sizeof(line_info_t));
+  current_info->nof_input_strings = 0;
+  current_info->nof_tokens = 0;
 
   while ((current_token = yylex())) {
     switch (current_token) {
     case TOK_NEWLINE: {
-      if (!handle_line(&state.text_state, &current_info)) {
-        ASM_ERROR("%s line %d: parsing failed", state.input_file, line_num);
-        return false;
+      if (nof_preprocessed + 1 >= preprocessed_capacity) {
+        preprocessed_capacity *= 2;
+        preprocessed_lines = realloc(
+            preprocessed_lines, preprocessed_capacity * sizeof(line_info_t *));
+        if (!preprocessed_lines) {
+          perror("realloc");
+          ASM_ERROR("Failed to realloc");
+          return false;
+        }
       }
-      current_info.nof_tokens = 0;
-      current_info.nof_input_strings = 0;
+      preprocessed_lines[nof_preprocessed++] = current_info;
+      current_info = malloc(sizeof(line_info_t));
+      memset(current_info, 0, sizeof(line_info_t));
+      current_info->nof_tokens = 0;
+      current_info->nof_input_strings = 0;
+      current_info->tokens[0] = 999;
       continue;
     }
     case TOK_COMMA:
@@ -248,7 +262,7 @@ bool assemble_file(const char *input_file, const char *output_file) {
     case TOK_TEXT_LABEL_REF:
     case OPCODE_DIVB:
     case OPCODE_IDIVQ:
-      current_info.input_strings[current_info.nof_input_strings++] =
+      current_info->input_strings[current_info->nof_input_strings++] =
           strdup(yytext);
       break;
     case TOK_UNKNOWN:
@@ -256,8 +270,110 @@ bool assemble_file(const char *input_file, const char *output_file) {
                 line_num, yytext);
       return false;
     }
-    current_info.tokens[current_info.nof_tokens++] = current_token;
+    current_info->tokens[current_info->nof_tokens++] = current_token;
   }
+
+  function_chunk_t **function_chunks = malloc(10 * sizeof(function_chunk_t *));
+  size_t chunk_capacity = 10;
+  size_t function_idx = 0;
+
+  for (size_t i = 0; i < nof_preprocessed; i++) {
+    switch (preprocessed_lines[i]->tokens[0]) {
+    case TOK_NEWLINE:
+      continue;
+    case TOK_FUNC_END: {
+      if (function_chunks[function_idx]->nof_lines + 1 >=
+          function_chunks[function_idx]->line_capacity) {
+        function_chunks[function_idx]->line_capacity *= 2;
+        function_chunks[function_idx]->lines =
+            realloc(function_chunks[function_idx]->lines,
+                    function_chunks[function_idx]->line_capacity *
+                        sizeof(line_info_t *));
+        if (!function_chunks[function_idx]->lines) {
+          ASM_ERROR("Realloc failed");
+          return false;
+        }
+      }
+      function_chunks[function_idx]
+          ->lines[function_chunks[function_idx]->nof_lines++] =
+          preprocessed_lines[i];
+
+      if (function_idx + 1 >= chunk_capacity) {
+        chunk_capacity *= 2;
+        function_chunks = realloc(function_chunks,
+                                  chunk_capacity * sizeof(function_chunk_t *));
+        if (!function_chunks) {
+          ASM_ERROR("Realloc failed");
+          return false;
+        }
+      }
+
+      function_idx++;
+      break;
+    }
+    case TOK_FUNC_START: {
+      function_chunk_t *new_chunk = malloc(sizeof(function_chunk_t));
+      memset(new_chunk, 0, sizeof(function_chunk_t));
+      new_chunk->lines = malloc(10 * sizeof(line_info_t *));
+      new_chunk->line_capacity = 10;
+      new_chunk->nof_lines = 0;
+      new_chunk->lines[new_chunk->nof_lines++] = preprocessed_lines[i];
+      function_chunks[function_idx] = new_chunk;
+      break;
+    }
+
+    case TOK_IDENT_TAG:
+    case TOK_RODATA_LABEL:
+    case TOK_FILEHEADER:
+    case TOK_SECTION:
+    case TOK_SECTION_TEXT:
+    case TOK_SECTION_RODATA:
+    case TOK_SECTION_DATA:
+    case TOK_SECTION_BSS:
+    case TOK_STRINGDEF:
+    case TOK_GLOBLDEF:
+    case TOK_TYPEDEF:
+    case TOK_SIZEDEF:
+    case TOK_ALIGN:
+    case TOK_SECTION_GNUSTACK:
+      if (!handle_line(&state.text_state, preprocessed_lines[i])) {
+        ASM_ERROR("preprocessing failed on line %d", line_num);
+        return false;
+      }
+      free(preprocessed_lines[i]);
+      break;
+    default: {
+      if (function_chunks[function_idx]->nof_lines + 1 >=
+          function_chunks[function_idx]->line_capacity) {
+        function_chunks[function_idx]->line_capacity *= 2;
+        function_chunks[function_idx]->lines =
+            realloc(function_chunks[function_idx]->lines,
+                    function_chunks[function_idx]->line_capacity *
+                        sizeof(line_info_t *));
+        if (!function_chunks[function_idx]->lines) {
+          ASM_ERROR("Realloc failed");
+          return false;
+        }
+      }
+      function_chunks[function_idx]
+          ->lines[function_chunks[function_idx]->nof_lines++] =
+          preprocessed_lines[i];
+      break;
+    }
+    }
+  }
+
+  state.text_state.parse_mode = TEXT;
+  for (size_t i = 0; i < function_idx; i++) {
+    for (size_t j = 0; j < function_chunks[i]->nof_lines; j++) {
+      if (!handle_line(&state.text_state, function_chunks[i]->lines[j])) {
+        ASM_ERROR("function assembling failed");
+        return false;
+      }
+    }
+    free(function_chunks[i]->lines);
+  }
+  free(function_chunks);
 
   print_text_debug(&state.text_state);
 

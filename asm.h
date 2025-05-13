@@ -4,6 +4,12 @@
 #include "elf.h"
 #include "state.h"
 
+typedef struct function_chunk_s {
+  line_info_t **lines;
+  size_t line_capacity;
+  size_t nof_lines;
+} function_chunk_t;
+
 // Initialize ELF sections
 // allocate memory
 // prepare text_state_t substruct
