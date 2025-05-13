@@ -5,9 +5,36 @@
 #include "log.h"
 #include "state.h"
 #include "text.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+void *line_worker(void *arg) {
+  thread_arg_t *t_arg = (thread_arg_t *)arg;
+
+  for (size_t i = 0; i < t_arg->chunk->nof_lines; i++) {
+    if (!handle_line(t_arg->text_state, t_arg->chunk->lines[i])) {
+      t_arg->result = -1;
+      return NULL;
+    }
+  }
+  return NULL;
+}
+
+text_state_t *clone_text_state(const text_state_t *orig) {
+  text_state_t *new_state = malloc(sizeof(text_state_t));
+  if (!new_state)
+    return NULL;
+
+  memcpy(new_state, orig, sizeof(text_state_t));
+
+  new_state->instructions = (inst_t *)malloc(INIT_INSTRUCTION_COUNT);
+  new_state->inst_capacity = INIT_INSTRUCTION_COUNT;
+
+  // If you have pointers inside text_state_t, do deep copy here
+  return new_state;
+}
 
 void print_text_debug(text_state_t *state) {
   ASM_DEBUG("--- finished parsing .text ---");
@@ -140,9 +167,15 @@ bool assembler_process_symbols(asm_state_t *state) {
     }
   }
 
-  asm_buf_t *text_buf = &state->sections[state->text_idx].content;
-  for (size_t i = 0; i < state->text_state.nof_instructions; i++) {
-    inst_t *instr = &state->text_state.instructions[i];
+  return true;
+}
+
+bool write_instructions_to_buffer(asm_state_t *state, asm_buf_t *text_buf,
+                                  text_state_t *text_state,
+                                  size_t current_offset) {
+
+  for (size_t i = 0; i < text_state->nof_instructions; i++) {
+    inst_t *instr = &text_state->instructions[i];
 
     if (instr->status == JMP_REQUIRES_OFFSET) {
       jmp_extra_t *extra = instr->extra;
@@ -151,9 +184,9 @@ bool assembler_process_symbols(asm_state_t *state) {
         return false;
       }
       text_label_t *referenced_label = NULL;
-      for (size_t j = 0; j < state->text_state.nof_text_labels; j++) {
-        if (strcmp(state->text_state.text_labels[j].label, extra->label) == 0)
-          referenced_label = &state->text_state.text_labels[j];
+      for (size_t j = 0; j < text_state->nof_text_labels; j++) {
+        if (strcmp(text_state->text_labels[j].label, extra->label) == 0)
+          referenced_label = &text_state->text_labels[j];
       }
       if (referenced_label == NULL) {
         ASM_ERROR("no such text label %s", extra->label);
@@ -188,15 +221,30 @@ bool assembler_process_symbols(asm_state_t *state) {
         actual_jmp_value -= instr->machine_code_len;
         memcpy(instr->machine_code + jmp_value_start, &actual_jmp_value, 4);
         // ensure all locations further on are correct
-        if (!apply_text_shift(&state->text_state, i, added_bytes))
+        if (!apply_text_shift(text_state, i, added_bytes))
           return false;
       }
     }
 
     buffer_append(text_buf, instr->machine_code, instr->machine_code_len);
     if (instr->rela != NULL)
-      add_rela(state, instr->rela->name, instr->rela->offset, instr->rela->type,
-               instr->rela->addend);
+      add_rela(state, instr->rela->name, instr->rela->offset + current_offset,
+               instr->rela->type, instr->rela->addend);
+  }
+
+  for (size_t i = 0; i < text_state->nof_functions; i++) {
+    func_t *f = &text_state->functions[i];
+    if (f->is_global) {
+      elf_symbol_t *sym = NULL;
+      if ((sym = find_symbol(state, f->name)) == NULL) {
+        add_symbol(state, f->name, f->sec_idx, f->location, f->type,
+                   STB_GLOBAL);
+        state->symbols[state->nof_symbols - 1].size = f->size;
+      } else if (sym->size == 0) {
+        sym->size = f->size;
+        sym->value = f->location + current_offset;
+      }
+    }
   }
   return true;
 }
@@ -364,23 +412,50 @@ bool assemble_file(const char *input_file, const char *output_file) {
   }
 
   state.text_state.parse_mode = TEXT;
-  for (size_t i = 0; i < function_idx; i++) {
-    for (size_t j = 0; j < function_chunks[i]->nof_lines; j++) {
-      if (!handle_line(&state.text_state, function_chunks[i]->lines[j])) {
-        ASM_ERROR("function assembling failed");
-        return false;
-      }
-    }
-    free(function_chunks[i]->lines);
-  }
-  free(function_chunks);
 
-  print_text_debug(&state.text_state);
+  pthread_t *threads = malloc(function_idx * sizeof(pthread_t));
+  thread_arg_t *args = malloc(function_idx * sizeof(thread_arg_t));
+
+  for (size_t i = 0; i < function_idx; i++) {
+    text_state_t *new_state = clone_text_state(&state.text_state);
+    state.text_state.local_function_idx++;
+
+    args[i].text_state = new_state;
+    args[i].chunk = function_chunks[i];
+    args[i].result = 0;
+
+    if (pthread_create(&threads[i], NULL, line_worker, &args[i]) != 0) {
+      ASM_ERROR("thread creation failed");
+      return false;
+    }
+  }
 
   if (!assembler_process_symbols(&state)) {
     ASM_ERROR("Symbol processing failed");
     return false;
   }
+
+  size_t current_text_offset = 0;
+  for (size_t j = 0; j < function_idx; j++) {
+    pthread_join(threads[j], NULL);
+    if (args[j].result != 0) {
+      ASM_ERROR("function assembling failed in thread");
+      return false;
+    }
+    // ensure offset is correct
+    state.text_state.functions[j].location = current_text_offset;
+    state.text_state.functions[j].size = args[j].text_state->functions[j].size;
+
+    write_instructions_to_buffer(&state,
+                                 &state.sections[state.text_idx].content,
+                                 args[j].text_state, current_text_offset);
+    current_text_offset += args[j].text_state->functions[j].size;
+  }
+
+  free(threads);
+  free(args);
+
+  print_text_debug(&state.text_state);
 
   if (!write_elf_object_file(&state)) {
     ASM_ERROR("Failed to write to ELF file %s", state.output_file);

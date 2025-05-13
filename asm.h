@@ -10,6 +10,12 @@ typedef struct function_chunk_s {
   size_t nof_lines;
 } function_chunk_t;
 
+typedef struct {
+  text_state_t *text_state;
+  function_chunk_t *chunk;
+  int result;
+} thread_arg_t;
+
 // Initialize ELF sections
 // allocate memory
 // prepare text_state_t substruct

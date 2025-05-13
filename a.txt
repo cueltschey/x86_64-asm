@@ -1,0 +1,30 @@
+
+test.o:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <some_function>:
+   0:	55                   	push   %rbp
+   1:	48 89 e5             	mov    %rsp,%rbp
+   4:	48 83 ec 10          	sub    $0x10,%rsp
+   8:	48 89 7d f8          	mov    %rdi,-0x8(%rbp)
+   c:	48 8b 45 f8          	mov    -0x8(%rbp),%rax
+  10:	48 89 c6             	mov    %rax,%rsi
+  13:	48 8d 05 00 00 00 00 	lea    0x0(%rip),%rax        # 1a <some_function+0x1a>
+  1a:	48 89 c7             	mov    %rax,%rdi
+  1d:	b8 00 00 00 00       	mov    $0x0,%eax
+  22:	e8 00 00 00 00       	call   27 <some_function+0x27>
+  27:	90                   	nop
+  28:	c9                   	leave
+  29:	c3                   	ret
+
+000000000000002a <main>:
+  2a:	55                   	push   %rbp
+  2b:	48 89 e5             	mov    %rsp,%rbp
+  2e:	48 83 ec 10          	sub    $0x10,%rsp
+  32:	48 89 7d f8          	mov    %rdi,-0x8(%rbp)
+  36:	48 8b 45 f8          	mov    -0x8(%rbp),%rax
+  3a:	48 89 c6             	mov    %rax,%rsi
+  3d:	48 8d 05 00 00 00 00 	lea    0x0(%rip),%rax        # 44 <main+0x1a>
+  44:	48 89 c7             	mov    %rax,%rdi
